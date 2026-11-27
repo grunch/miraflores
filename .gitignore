@@ -11,3 +11,6 @@ recursos/
 entregables/**/*.glb
 entregables/**/*.zip
 entregables/**/*.jpg
+
+# Coordinación entre agentes cuando no hay git (con git vive en .git/agentes).
+.agentes/
