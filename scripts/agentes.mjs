@@ -58,7 +58,7 @@ function imprimirEstado() {
   console.log(`## Sesiones (${sesiones.length}) · inactiva tras ${INACTIVIDAD_MS / 60000} min sin latido`);
   for (const s of sesiones) {
     console.log(`- ${s.id}${s.inactiva ? ' [INACTIVA]' : ''} · ${s.agente} · ${s.tarea}` +
-      `${s.rama ? ` · rama ${s.rama}` : ''} · desde ${s.inicio} · latido hace ${minutos(s.latido)} min`);
+      `${s.rama ? ` · rama ${s.rama}` : ''}${s.directorio ? ` · en ${s.directorio}` : ''} · desde ${s.inicio} · latido hace ${minutos(s.latido)} min`);
   }
   console.log(`\n## Reclamos (${reclamos.length})`);
   for (const r of reclamos) console.log(`- ${r.recurso} → ${r.id} (desde ${r.desde})`);
@@ -70,7 +70,7 @@ const comandos = {
   estado: () => imprimirEstado(),
   iniciar: ({opciones}) => {
     requerir(opciones, 'agente', 'tarea');
-    const s = iniciarSesion({raiz: RAIZ, agente: opciones.agente, tarea: opciones.tarea, rama: opciones.rama ?? null});
+    const s = iniciarSesion({raiz: RAIZ, agente: opciones.agente, tarea: opciones.tarea, rama: opciones.rama ?? null, directorio: process.cwd()});
     console.log(s.id);
   },
   reclamar: ({opciones, sueltos}) => {
@@ -95,11 +95,19 @@ const comandos = {
     const cada = Number(process.env.AGENTES_LATIDO_MS) || LATIDO_RECOMENDADO_MS;
     latido({raiz: RAIZ, id: opciones.id});
     return new Promise((resolver) => {
-      const reloj = setInterval(() => {
-        try { latido({raiz: RAIZ, id: opciones.id}); } catch (e) { console.error(`Aviso: latido fallido: ${e.message}`); }
-      }, cada);
+      let perdida = false;
       const hijo = spawn(opciones.comando[0], opciones.comando.slice(1), {stdio: 'inherit'});
-      const fin = (codigo) => { clearInterval(reloj); resolver(codigo); };
+      // Si la sesión caduca o desaparece, sus reclamos dejan de valer: se detiene el comando.
+      const reloj = setInterval(() => {
+        try { latido({raiz: RAIZ, id: opciones.id}); } catch (e) {
+          perdida = true;
+          clearInterval(reloj);
+          console.error(`Error: ${e.message}. Se detiene el comando porque sus reclamos ya no valen.`);
+          hijo.kill('SIGTERM');
+          setTimeout(() => hijo.kill('SIGKILL'), 5000).unref();
+        }
+      }, cada);
+      const fin = (codigo) => { clearInterval(reloj); resolver(perdida ? 1 : codigo); };
       hijo.on('error', (e) => { console.error(`Error: ${e.message}`); fin(1); });
       hijo.on('exit', (codigo, senal) => fin(codigo ?? (senal ? 1 : 0)));
     });

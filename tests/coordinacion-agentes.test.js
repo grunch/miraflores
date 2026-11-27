@@ -1,13 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync, rmSync, readFileSync, existsSync, readdirSync, writeFileSync, utimesSync, chmodSync} from 'node:fs';
-import {spawnSync} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Worker} from 'node:worker_threads';
 import {
   INACTIVIDAD_MS, iniciarSesion, latido, reclamar, liberar, anotar, terminar,
-  estado, limpiarInactivas, normalizarRecurso,
+  estado, limpiarInactivas, normalizarRecurso, liberarTodos,
 } from '../scripts/coordinacion-agentes.mjs';
 
 const T0 = Date.parse('2026-11-27T15:00:00Z');
@@ -209,6 +209,57 @@ test('ejecutar mantiene el latido mientras corre un comando largo y devuelve su 
   assert.equal(r.status, 3);
   assert.ok(estado({raiz}).sesiones[0].latido > antes, 'hubo latidos durante el comando');
 }));
+
+const pidMuerto = () => spawnSync('node', ['-e', 'process.stdout.write(String(process.pid))'], {encoding: 'utf8'}).stdout;
+
+test('un cerrojo de un proceso vivo no se rompe aunque sea antiguo; el de un proceso muerto sí', () => conRaiz((raiz) => {
+  const a = sesion(raiz, 'A', Date.now() - INACTIVIDAD_MS - 1000);
+  reclamar({raiz, id: a.id, recursos: ['README.md'], ahora: Date.now() - INACTIVIDAD_MS - 1000});
+  const [archivo] = readdirSync(join(raiz, 'reclamos'));
+  const cerrojo = join(raiz, 'reclamos', `${archivo}.toma`);
+  const viejo = new Date(Date.now() - 3600000);
+  writeFileSync(cerrojo, `${process.pid}\n`);
+  utimesSync(cerrojo, viejo, viejo);
+  const b = sesion(raiz, 'B', Date.now());
+  assert.equal(reclamar({raiz, id: b.id, recursos: ['README.md']}).conflictos.length, 1, 'dueño vivo: se respeta');
+  writeFileSync(cerrojo, `${pidMuerto()}\n`);
+  assert.deepEqual(reclamar({raiz, id: b.id, recursos: ['README.md']}).conflictos, [], 'dueño muerto: se recupera');
+}));
+
+test('liberarTodos intenta todos los recursos e informa de los que no pudo liberar', () => conRaiz((raiz) => {
+  const a = sesion(raiz, 'A');
+  reclamar({raiz, id: a.id, recursos: ['README.md', 'docs', 'puerto:5174'], ahora: T0});
+  const archivoDocs = readdirSync(join(raiz, 'reclamos'))
+    .find((n) => JSON.parse(readFileSync(join(raiz, 'reclamos', n), 'utf8')).recurso === 'docs');
+  writeFileSync(join(raiz, 'reclamos', `${archivoDocs}.toma`), `${process.pid}\n`);
+  const fallidos = liberarTodos({raiz, id: a.id, recursos: ['README.md', 'docs', 'puerto:5174']});
+  assert.deepEqual(fallidos.map((f) => f.recurso), ['docs']);
+  assert.deepEqual(estado({raiz, ahora: T0}).reclamos.map((r) => r.recurso), ['docs']);
+}));
+
+test('la sesión registra su directorio de trabajo', () => conRaiz((raiz) => {
+  iniciarSesion({raiz, agente: 'A', tarea: 't', directorio: '/tmp/miraflores-teatro', ahora: T0});
+  assert.equal(estado({raiz, ahora: T0}).sesiones[0].directorio, '/tmp/miraflores-teatro');
+}));
+
+test('ejecutar detiene el comando y falla si la sesión caduca mientras corre', async () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'agentes-'));
+  try {
+    const cli = new URL('../scripts/agentes.mjs', import.meta.url).pathname;
+    const env = {...process.env, AGENTES_DIR: raiz, AGENTES_LATIDO_MS: '50'};
+    const id = spawnSync('node', [cli, 'iniciar', '--agente', 'A', '--tarea', 'build'], {env, encoding: 'utf8'}).stdout.trim();
+    const inicio = Date.now();
+    const hijo = spawn('node', [cli, 'ejecutar', '--id', id, '--', 'node', '-e', 'setTimeout(()=>{},10000)'], {env, stdio: 'ignore'});
+    setTimeout(() => {
+      const ruta = join(raiz, 'sesiones', `${id}.json`);
+      const s = JSON.parse(readFileSync(ruta, 'utf8'));
+      writeFileSync(ruta, JSON.stringify({...s, latido: new Date(Date.now() - INACTIVIDAD_MS - 1000).toISOString()}));
+    }, 200);
+    const codigo = await new Promise((ok) => hijo.on('exit', ok));
+    assert.notEqual(codigo, 0);
+    assert.ok(Date.now() - inicio < 5000, 'no esperó a que el comando terminara solo');
+  } finally { rmSync(raiz, {recursive: true, force: true}); }
+});
 
 async function enHilos(raiz, ids, recurso) {
   const modulo = new URL('../scripts/coordinacion-agentes.mjs', import.meta.url).href;

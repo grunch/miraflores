@@ -94,13 +94,13 @@ function exigirSesionActiva(raiz, id, ahora) {
   return s;
 }
 
-export function iniciarSesion({raiz, agente, tarea, rama = null, ahora = Date.now()}) {
+export function iniciarSesion({raiz, agente, tarea, rama = null, directorio = null, ahora = Date.now()}) {
   if (!agente || !tarea) throw new TypeError('iniciar necesita agente y tarea');
   mkdirSync(dirSesiones(raiz), {recursive: true});
   mkdirSync(dirReclamos(raiz), {recursive: true});
   const fecha = iso(ahora).replace(/[-:]/g, '');
   const id = `${slug(agente)}-${fecha.slice(0, 8)}-${fecha.slice(9, 13)}-${sufijo().slice(0, 4)}`;
-  const sesion = {id, agente, tarea, rama, inicio: iso(ahora), latido: iso(ahora)};
+  const sesion = {id, agente, tarea, rama, directorio, inicio: iso(ahora), latido: iso(ahora)};
   writeFileSync(archivoSesion(raiz, id), `${JSON.stringify(sesion, null, 2)}\n`, {flag: 'wx'});
   anotar({raiz, id, mensaje: `inició: ${tarea}`, ahora});
   return sesion;
@@ -117,24 +117,55 @@ export function latido({raiz, id, tarea, ahora = Date.now()}) {
   });
 }
 
+function procesoVivo(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+
 /**
- * Ejecuta fn con el cerrojo exclusivo de un reclamo. Todo borrado de un reclamo pasa por aquí, así
- * la comprobación y el borrado son una sola transición: nadie borra un reclamo recién creado por otro.
- * Devuelve null si otro agente tiene el cerrojo. Un cerrojo más antiguo que CERROJO_HUERFANO_MS es de
- * un proceso que murió en mitad de la transición y se descarta.
+ * Un cerrojo es huérfano solo si el proceso que lo creó ya no existe (todos los agentes corren en esta
+ * máquina). La antigüedad no basta: un dueño vivo puede estar suspendido. Sin pid legible (cerrojo de
+ * otra herramienta), se recurre a la antigüedad.
+ */
+function cerrojoHuerfano(cerrojo) {
+  let contenido; let edad;
+  try {
+    contenido = readFileSync(cerrojo, 'utf8');
+    edad = Date.now() - statSync(cerrojo).mtimeMs;
+  } catch (e) { if (e.code === 'ENOENT') return false; throw e; }
+  const vivo = procesoVivo(Number.parseInt(contenido, 10));
+  return vivo === null ? edad >= CERROJO_HUERFANO_MS : !vivo;
+}
+
+/**
+ * Retira un cerrojo huérfano bajo un segundo cerrojo (<cerrojo>.rec) y volviendo a comprobar dentro:
+ * dos agentes que vieron el mismo cerrojo huérfano no pueden borrar el cerrojo nuevo de un tercero.
+ */
+function recuperarCerrojo(cerrojo) {
+  const rec = `${cerrojo}.rec`;
+  try { writeFileSync(rec, `${process.pid}\n`, {flag: 'wx'}); } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+    if (cerrojoHuerfano(rec)) rmSync(rec, {force: true}); // el recuperador murió dentro de la recuperación
+    return;
+  }
+  try { if (cerrojoHuerfano(cerrojo)) rmSync(cerrojo, {force: true}); } finally { rmSync(rec, {force: true}); }
+}
+
+/**
+ * Ejecuta fn con el cerrojo exclusivo <ruta>.toma. Todo borrado de un reclamo y toda escritura de una
+ * sesión pasan por aquí, así la comprobación y el cambio son una sola transición.
+ * Devuelve null si otro proceso vivo tiene el cerrojo.
  */
 function conCerrojo(ruta, fn) {
   const cerrojo = `${ruta}.toma`;
-  for (let intento = 0; intento < 2; intento += 1) {
+  for (let intento = 0; intento < 3; intento += 1) {
     try {
       writeFileSync(cerrojo, `${process.pid}\n`, {flag: 'wx'});
       try { return fn(); } finally { rmSync(cerrojo, {force: true}); }
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
-      let edad;
-      try { edad = Date.now() - statSync(cerrojo).mtimeMs; } catch (s) { if (s.code === 'ENOENT') continue; throw s; }
-      if (edad < CERROJO_HUERFANO_MS) return null;
-      rmSync(cerrojo, {force: true});
+      if (!cerrojoHuerfano(cerrojo)) return null;
+      recuperarCerrojo(cerrojo);
     }
   }
   return null;
@@ -178,7 +209,9 @@ function tomarSiAbandonado(raiz, ruta, ahora) {
 function publicarReclamo(ruta, datos) {
   const tmp = `${ruta}.${process.pid}.${sufijo()}.tmp`;
   writeFileSync(tmp, datos);
-  try { linkSync(tmp, ruta); } finally { rmSync(tmp, {force: true}); }
+  try { linkSync(tmp, ruta); } finally {
+    try { rmSync(tmp, {force: true}); } catch { /* el reclamo ya se publicó: un temporal huérfano es inofensivo */ }
+  }
 }
 
 function crearReclamo(raiz, recurso, id, ahora) {
@@ -215,7 +248,10 @@ export function reclamar({raiz, id, recursos, ahora = Date.now()}) {
   exigirSesionActiva(raiz, id, ahora);
   const pedidos = [...new Set(recursos.map(normalizarRecurso))];
   const nuevos = [];
-  const deshacer = () => { for (const recurso of nuevos) borrarReclamoPropio(raiz, recurso, id); };
+  const deshacer = () => {
+    const fallidos = liberarTodos({raiz, id, recursos: nuevos});
+    if (fallidos.length) throw new Error(`Reversión incompleta: no se liberaron ${fallidos.map((f) => f.recurso).join(', ')}`);
+  };
   try {
     let conflictos = [];
     for (const recurso of pedidos) {
@@ -229,13 +265,23 @@ export function reclamar({raiz, id, recursos, ahora = Date.now()}) {
     latido({raiz, id, ahora});
     return {obtenidos: pedidos, conflictos: []};
   } catch (e) {
-    try { deshacer(); } catch { /* se relanza el error original */ }
+    try { deshacer(); } catch (r) { throw new Error(`${e.message}. ${r.message}; libéralos con «liberar».`, {cause: e}); }
     throw e;
   }
 }
 
+/** Intenta liberar todos los recursos aunque alguno falle. Devuelve los fallidos con su error. */
+export function liberarTodos({raiz, id, recursos}) {
+  const fallidos = [];
+  for (const recurso of recursos.map(normalizarRecurso)) {
+    try { borrarReclamoPropio(raiz, recurso, id); } catch (error) { fallidos.push({recurso, error}); }
+  }
+  return fallidos;
+}
+
 export function liberar({raiz, id, recursos}) {
-  for (const recurso of recursos.map(normalizarRecurso)) borrarReclamoPropio(raiz, recurso, id);
+  const fallidos = liberarTodos({raiz, id, recursos});
+  if (fallidos.length) throw new Error(fallidos.map((f) => f.error.message).join(' '));
 }
 
 export function anotar({raiz, id, mensaje, ahora = Date.now()}) {
