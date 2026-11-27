@@ -100,10 +100,13 @@ export function grupoActivo(pgid, fuente = process.platform === 'linux' ? PROC :
 }
 const SENALES = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
+const CODIGO_SENAL = {SIGHUP: 129, SIGINT: 130, SIGTERM: 143};
+
 /**
- * Ejecuta el comando en su propio grupo de procesos y emite latidos mientras corre. Si la sesión
- * caduca o desaparece, detiene el grupo entero (SIGTERM y, tras la gracia, SIGKILL) y no termina
- * hasta que no quede ningún proceso del grupo.
+ * Ejecuta el comando en su propio grupo de procesos y emite latidos mientras corre. Si la sesión se
+ * pierde o el propio ejecutar recibe SIGINT/SIGTERM/SIGHUP, detiene el grupo entero con la misma
+ * rutina (señal, gracia, SIGKILL) y no devuelve el control hasta que no queda ningún proceso que pueda
+ * ejecutarse: hasta entonces, nadie debe dar por libres sus recursos.
  */
 async function ejecutar({opciones}) {
   requerir(opciones, 'id');
@@ -114,35 +117,42 @@ async function ejecutar({opciones}) {
   const hijo = spawn(opciones.comando[0], opciones.comando.slice(1), {stdio: 'inherit', detached: true});
   const alGrupo = (senal) => { try { process.kill(-hijo.pid, senal); } catch { /* el grupo ya terminó */ } };
   const grupoVivo = () => grupoActivo(hijo.pid);
-  for (const senal of SENALES) process.on(senal, alGrupo);
-  let perdida = null;
+  let parada = null;
+  let codigoParada = 1;
+  const detener = (senal, codigo) => {
+    if (parada) return;
+    codigoParada = codigo;
+    parada = (async () => {
+      alGrupo(senal);
+      const limite = Date.now() + gracia;
+      while (grupoVivo() && Date.now() < limite) await dormir(50);
+      if (grupoVivo()) alGrupo('SIGKILL');
+      const final = Date.now() + gracia; // SIGKILL no se puede ignorar; el límite solo evita colgarse
+      while (grupoVivo() && Date.now() < final) await dormir(20);
+      if (grupoVivo()) console.error(`Aviso: el grupo ${hijo.pid} sigue vivo tras SIGKILL; revísalo a mano.`);
+    })();
+  };
+  const alRecibir = (senal) => detener(senal, CODIGO_SENAL[senal]);
+  for (const senal of SENALES) process.on(senal, alRecibir);
   const salida = new Promise((ok) => {
     hijo.on('error', (e) => { console.error(`Error: ${e.message}`); ok(1); });
     hijo.on('exit', (codigo, senal) => ok(codigo ?? (senal ? 1 : 0)));
   });
   const reloj = setInterval(() => {
     latido({raiz: RAIZ, id: opciones.id}).catch((e) => {
-      if (perdida) return;
+      if (parada) return;
       clearInterval(reloj);
       console.error(`Error: ${e.message}. Se detiene el comando porque sus reclamos ya no valen.`);
-      perdida = (async () => {
-        alGrupo('SIGTERM');
-        const limite = Date.now() + gracia;
-        while (grupoVivo() && Date.now() < limite) await dormir(50);
-        if (grupoVivo()) alGrupo('SIGKILL');
-        const final = Date.now() + gracia; // SIGKILL no se puede ignorar; el límite solo evita colgarse
-        while (grupoVivo() && Date.now() < final) await dormir(20);
-        if (grupoVivo()) console.error(`Aviso: el grupo ${hijo.pid} sigue vivo tras SIGKILL; revísalo a mano.`);
-      })();
+      detener('SIGTERM', 1);
     });
   }, cada);
   try {
     const codigo = await salida;
-    if (perdida) { await perdida; return 1; }
+    if (parada) { await parada; return codigoParada; }
     return codigo;
   } finally {
     clearInterval(reloj);
-    for (const senal of SENALES) process.off(senal, alGrupo);
+    for (const senal of SENALES) process.off(senal, alRecibir);
   }
 }
 

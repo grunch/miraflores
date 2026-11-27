@@ -297,3 +297,22 @@ test('al caducar la sesión durante el comando, ejecutar lo detiene y falla', ()
   assert.equal(await new Promise((ok) => hijo.on('exit', ok)), 1);
   assert.ok(Date.now() - inicio < 8000, 'no esperó a que el comando terminara solo');
 }));
+
+test('si ejecutar recibe SIGTERM, detiene todo el grupo antes de salir', () => conRaiz(async (raiz) => {
+  const id = cli(raiz, ['iniciar', '--agente', 'A', '--tarea', 'build']).stdout.trim();
+  const listo = join(raiz, 'nieto-listo');
+  const marca = join(raiz, 'escrito-por-el-nieto');
+  const nieto = `process.on('SIGTERM',()=>{});require('fs').writeFileSync(${JSON.stringify(listo)},String(process.pid));` +
+    `setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(marca)},'x'),3000)`;
+  const padre = `require('child_process').spawn('node',['-e',${JSON.stringify(nieto)}],{stdio:'inherit'});setTimeout(()=>{},10000)`;
+  const env = {...process.env, AGENTES_DIR: raiz, AGENTES_GRACIA_MS: '500'};
+  const hijo = spawn('node', [CLI, 'ejecutar', '--id', id, '--', 'node', '-e', padre], {env, stdio: 'ignore'});
+  await esperarArchivo(listo);
+  const pidNieto = Number(readFileSync(listo, 'utf8'));
+  hijo.kill('SIGTERM');
+  const codigo = await new Promise((ok) => hijo.on('exit', (c, s) => ok(c ?? s)));
+  assert.equal(codigo, 143, 'sale con 128 + SIGTERM');
+  assert.equal(vivo(pidNieto), false, 'el nieto ya no puede ejecutarse cuando ejecutar sale');
+  await new Promise((ok) => setTimeout(ok, 3200));
+  assert.equal(existsSync(marca), false);
+}));
