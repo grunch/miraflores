@@ -96,18 +96,26 @@ const comandos = {
     latido({raiz: RAIZ, id: opciones.id});
     return new Promise((resolver) => {
       let perdida = false;
-      const hijo = spawn(opciones.comando[0], opciones.comando.slice(1), {stdio: 'inherit'});
+      // Grupo de procesos propio: al perder la sesión se detiene el comando con todos sus subprocesos.
+      const hijo = spawn(opciones.comando[0], opciones.comando.slice(1), {stdio: 'inherit', detached: true});
+      const alGrupo = (senal) => { try { process.kill(-hijo.pid, senal); } catch { /* el grupo ya terminó */ } };
+      const reenviar = (senal) => alGrupo(senal);
+      for (const senal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(senal, reenviar);
       // Si la sesión caduca o desaparece, sus reclamos dejan de valer: se detiene el comando.
       const reloj = setInterval(() => {
         try { latido({raiz: RAIZ, id: opciones.id}); } catch (e) {
           perdida = true;
           clearInterval(reloj);
           console.error(`Error: ${e.message}. Se detiene el comando porque sus reclamos ya no valen.`);
-          hijo.kill('SIGTERM');
-          setTimeout(() => hijo.kill('SIGKILL'), 5000).unref();
+          alGrupo('SIGTERM');
+          setTimeout(() => alGrupo('SIGKILL'), 5000).unref();
         }
       }, cada);
-      const fin = (codigo) => { clearInterval(reloj); resolver(perdida ? 1 : codigo); };
+      const fin = (codigo) => {
+        clearInterval(reloj);
+        for (const senal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(senal, reenviar);
+        resolver(perdida ? 1 : codigo);
+      };
       hijo.on('error', (e) => { console.error(`Error: ${e.message}`); fin(1); });
       hijo.on('exit', (codigo, senal) => fin(codigo ?? (senal ? 1 : 0)));
     });

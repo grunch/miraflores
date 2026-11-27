@@ -123,32 +123,63 @@ function procesoVivo(pid) {
 }
 
 /**
- * Un cerrojo es huérfano solo si el proceso que lo creó ya no existe (todos los agentes corren en esta
- * máquina). La antigüedad no basta: un dueño vivo puede estar suspendido. Sin pid legible (cerrojo de
- * otra herramienta), se recurre a la antigüedad.
+ * Devuelve la identidad (stat) del archivo si es un cerrojo huérfano: el proceso que lo creó ya no
+ * existe (todos los agentes corren en esta máquina). La antigüedad no basta, porque un dueño vivo puede
+ * estar suspendido; solo se usa si el cerrojo no tiene un pid legible (lo dejó otra herramienta).
  */
-function cerrojoHuerfano(cerrojo) {
-  let contenido; let edad;
+function observarHuerfano(ruta) {
+  let identidad; let contenido;
   try {
-    contenido = readFileSync(cerrojo, 'utf8');
-    edad = Date.now() - statSync(cerrojo).mtimeMs;
-  } catch (e) { if (e.code === 'ENOENT') return false; throw e; }
+    identidad = statSync(ruta);
+    contenido = readFileSync(ruta, 'utf8');
+  } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
   const vivo = procesoVivo(Number.parseInt(contenido, 10));
-  return vivo === null ? edad >= CERROJO_HUERFANO_MS : !vivo;
+  const huerfano = vivo === null ? Date.now() - identidad.mtimeMs >= CERROJO_HUERFANO_MS : !vivo;
+  return huerfano ? identidad : null;
+}
+
+const mismoArchivo = (a, b) =>
+  a.dev === b.dev && a.ino === b.ino && a.birthtimeMs === b.birthtimeMs && a.mtimeMs === b.mtimeMs;
+
+/**
+ * Retira el archivo solo si sigue siendo el que se observó. Se aparta con un rename atómico y se
+ * compara su identidad; si resulta ser otro (el cerrojo nuevo de un dueño vivo), se devuelve a su
+ * sitio con link(), que no pisa un archivo más reciente.
+ */
+function retirarSiEsElMismo(ruta, observado) {
+  const apartado = `${ruta}.${process.pid}.${sufijo()}.retirado`;
+  try { renameSync(ruta, apartado); } catch (e) { if (e.code === 'ENOENT') return false; throw e; }
+  if (mismoArchivo(statSync(apartado), observado)) { rmSync(apartado, {force: true}); return true; }
+  try { linkSync(apartado, ruta); } catch (e) { if (e.code !== 'EEXIST') throw e; }
+  rmSync(apartado, {force: true});
+  return false;
+}
+
+/** Publica el archivo completo de una vez: link() es atómico y falla con EEXIST si ya existe. */
+function publicarExclusivo(ruta, datos) {
+  const tmp = `${ruta}.${process.pid}.${sufijo()}.tmp`;
+  writeFileSync(tmp, datos);
+  try { linkSync(tmp, ruta); } finally {
+    try { rmSync(tmp, {force: true}); } catch { /* ya se publicó: un temporal huérfano es inofensivo */ }
+  }
 }
 
 /**
- * Retira un cerrojo huérfano bajo un segundo cerrojo (<cerrojo>.rec) y volviendo a comprobar dentro:
- * dos agentes que vieron el mismo cerrojo huérfano no pueden borrar el cerrojo nuevo de un tercero.
+ * Retira un cerrojo huérfano bajo un segundo cerrojo (<cerrojo>.rec). Ambas retiradas verifican la
+ * identidad del archivo observado, así que nadie borra el cerrojo nuevo de otro proceso.
  */
 function recuperarCerrojo(cerrojo) {
   const rec = `${cerrojo}.rec`;
-  try { writeFileSync(rec, `${process.pid}\n`, {flag: 'wx'}); } catch (e) {
+  try { publicarExclusivo(rec, `${process.pid}\n`); } catch (e) {
     if (e.code !== 'EEXIST') throw e;
-    if (cerrojoHuerfano(rec)) rmSync(rec, {force: true}); // el recuperador murió dentro de la recuperación
+    const recHuerfano = observarHuerfano(rec); // el recuperador murió dentro de la recuperación
+    if (recHuerfano) retirarSiEsElMismo(rec, recHuerfano);
     return;
   }
-  try { if (cerrojoHuerfano(cerrojo)) rmSync(cerrojo, {force: true}); } finally { rmSync(rec, {force: true}); }
+  try {
+    const huerfano = observarHuerfano(cerrojo);
+    if (huerfano) retirarSiEsElMismo(cerrojo, huerfano);
+  } finally { rmSync(rec, {force: true}); }
 }
 
 /**
@@ -160,13 +191,14 @@ function conCerrojo(ruta, fn) {
   const cerrojo = `${ruta}.toma`;
   for (let intento = 0; intento < 3; intento += 1) {
     try {
-      writeFileSync(cerrojo, `${process.pid}\n`, {flag: 'wx'});
-      try { return fn(); } finally { rmSync(cerrojo, {force: true}); }
+      publicarExclusivo(cerrojo, `${process.pid}\n`);
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
-      if (!cerrojoHuerfano(cerrojo)) return null;
+      if (!observarHuerfano(cerrojo)) return null;
       recuperarCerrojo(cerrojo);
+      continue;
     }
+    try { return fn(); } finally { rmSync(cerrojo, {force: true}); }
   }
   return null;
 }
@@ -205,20 +237,11 @@ function tomarSiAbandonado(raiz, ruta, ahora) {
   }) ?? false;
 }
 
-/** Publica el reclamo completo de una vez: link() es atómico y falla con EEXIST si ya existe. */
-function publicarReclamo(ruta, datos) {
-  const tmp = `${ruta}.${process.pid}.${sufijo()}.tmp`;
-  writeFileSync(tmp, datos);
-  try { linkSync(tmp, ruta); } finally {
-    try { rmSync(tmp, {force: true}); } catch { /* el reclamo ya se publicó: un temporal huérfano es inofensivo */ }
-  }
-}
-
 function crearReclamo(raiz, recurso, id, ahora) {
   const ruta = archivoReclamo(raiz, recurso);
   const datos = `${JSON.stringify({recurso, id, desde: iso(ahora)}, null, 2)}\n`;
   for (let intento = 0; intento < 2; intento += 1) {
-    try { publicarReclamo(ruta, datos); return {ok: true}; } catch (e) {
+    try { publicarExclusivo(ruta, datos); return {ok: true}; } catch (e) {
       if (e.code !== 'EEXIST') throw e;
       const actual = leerJson(ruta);
       if (actual?.id === id) return {ok: true, previo: true};
@@ -326,3 +349,6 @@ export function estado({raiz, ahora = Date.now(), lineas = 30}) {
   const bitacora = existsSync(ruta) ? readFileSync(ruta, 'utf8').trimEnd().split('\n').slice(-lineas) : [];
   return {sesiones, reclamos, bitacora};
 }
+
+/** Solo para pruebas. */
+export const __pruebas = Object.freeze({retirarSiEsElMismo});

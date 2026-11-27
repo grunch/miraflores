@@ -1,13 +1,13 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, rmSync, readFileSync, existsSync, readdirSync, writeFileSync, utimesSync, chmodSync} from 'node:fs';
+import {mkdtempSync, rmSync, readFileSync, existsSync, readdirSync, writeFileSync, utimesSync, chmodSync, statSync} from 'node:fs';
 import {spawn, spawnSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Worker} from 'node:worker_threads';
 import {
   INACTIVIDAD_MS, iniciarSesion, latido, reclamar, liberar, anotar, terminar,
-  estado, limpiarInactivas, normalizarRecurso, liberarTodos,
+  estado, limpiarInactivas, normalizarRecurso, liberarTodos, __pruebas,
 } from '../scripts/coordinacion-agentes.mjs';
 
 const T0 = Date.parse('2026-11-27T15:00:00Z');
@@ -250,14 +250,63 @@ test('ejecutar detiene el comando y falla si la sesión caduca mientras corre', 
     const id = spawnSync('node', [cli, 'iniciar', '--agente', 'A', '--tarea', 'build'], {env, encoding: 'utf8'}).stdout.trim();
     const inicio = Date.now();
     const hijo = spawn('node', [cli, 'ejecutar', '--id', id, '--', 'node', '-e', 'setTimeout(()=>{},10000)'], {env, stdio: 'ignore'});
-    setTimeout(() => {
-      const ruta = join(raiz, 'sesiones', `${id}.json`);
-      const s = JSON.parse(readFileSync(ruta, 'utf8'));
+    // Se repite: un latido ya en curso podría reescribir la sesión justo después del primer envejecimiento.
+    const ruta = join(raiz, 'sesiones', `${id}.json`);
+    const s = JSON.parse(readFileSync(ruta, 'utf8'));
+    const envejecer = setInterval(() => {
       writeFileSync(ruta, JSON.stringify({...s, latido: new Date(Date.now() - INACTIVIDAD_MS - 1000).toISOString()}));
-    }, 200);
+    }, 20);
     const codigo = await new Promise((ok) => hijo.on('exit', ok));
+    clearInterval(envejecer);
     assert.notEqual(codigo, 0);
     assert.ok(Date.now() - inicio < 5000, 'no esperó a que el comando terminara solo');
+  } finally { rmSync(raiz, {recursive: true, force: true}); }
+});
+
+test('la recuperación no borra un cerrojo distinto del que se observó huérfano', () => conRaiz((raiz) => {
+  const cerrojo = join(raiz, 'x.toma');
+  writeFileSync(cerrojo, `${pidMuerto()}\n`);
+  const observado = statSync(cerrojo);
+  rmSync(cerrojo); // otro recuperador lo retiró...
+  writeFileSync(cerrojo, `${process.pid}\n`); // ...y un dueño nuevo y vivo creó el suyo
+  assert.equal(__pruebas.retirarSiEsElMismo(cerrojo, observado), false);
+  assert.equal(readFileSync(cerrojo, 'utf8'), `${process.pid}\n`, 'el cerrojo vivo sigue en su sitio');
+  assert.deepEqual(readdirSync(raiz), ['x.toma'], 'sin restos');
+}));
+
+test('la recuperación retira el cerrojo observado cuando sigue siendo el mismo', () => conRaiz((raiz) => {
+  const cerrojo = join(raiz, 'x.toma');
+  writeFileSync(cerrojo, `${pidMuerto()}\n`);
+  assert.equal(__pruebas.retirarSiEsElMismo(cerrojo, statSync(cerrojo)), true);
+  assert.deepEqual(readdirSync(raiz), []);
+}));
+
+test('un .rec huérfano de un recuperador muerto no bloquea la recuperación', () => conRaiz((raiz) => {
+  const a = sesion(raiz, 'A', Date.now() - INACTIVIDAD_MS - 1000);
+  reclamar({raiz, id: a.id, recursos: ['README.md'], ahora: Date.now() - INACTIVIDAD_MS - 1000});
+  const [archivo] = readdirSync(join(raiz, 'reclamos'));
+  const cerrojo = join(raiz, 'reclamos', `${archivo}.toma`);
+  writeFileSync(cerrojo, `${pidMuerto()}\n`);
+  writeFileSync(`${cerrojo}.rec`, `${pidMuerto()}\n`);
+  const b = sesion(raiz, 'B', Date.now());
+  assert.deepEqual(reclamar({raiz, id: b.id, recursos: ['README.md']}).conflictos, []);
+}));
+
+test('ejecutar detiene también los subprocesos del comando al perder la sesión', async () => {
+  const raiz = mkdtempSync(join(tmpdir(), 'agentes-'));
+  try {
+    const cli = new URL('../scripts/agentes.mjs', import.meta.url).pathname;
+    const env = {...process.env, AGENTES_DIR: raiz, AGENTES_LATIDO_MS: '50'};
+    const id = spawnSync('node', [cli, 'iniciar', '--agente', 'A', '--tarea', 'build'], {env, encoding: 'utf8'}).stdout.trim();
+    const marca = join(raiz, 'escrito-por-el-nieto');
+    const nieto = `setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(marca)},'x'),2500)`;
+    const padre = `require('child_process').spawn('node',['-e',${JSON.stringify(nieto)}],{stdio:'inherit'});setTimeout(()=>{},10000)`;
+    const hijo = spawn('node', [cli, 'ejecutar', '--id', id, '--', 'node', '-e', padre], {env, stdio: 'ignore'});
+    const borrar = setInterval(() => rmSync(join(raiz, 'sesiones', `${id}.json`), {force: true}), 20);
+    assert.notEqual(await new Promise((ok) => hijo.on('exit', ok)), 0);
+    clearInterval(borrar);
+    await new Promise((ok) => setTimeout(ok, 3000));
+    assert.equal(existsSync(marca), false, 'el nieto no siguió escribiendo');
   } finally { rmSync(raiz, {recursive: true, force: true}); }
 });
 
