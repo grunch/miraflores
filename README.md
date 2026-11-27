@@ -17,6 +17,10 @@ En este entorno `node_modules` es un enlace simbólico a las dependencias de una
 
 Los scripts de `scripts/` usan Playwright (`playwright`, instalado aparte) contra un servidor de desarrollo en marcha. Cada uno espera un puerto concreto (ver la tabla); los que lo admiten aceptan otra URL con `VISOR_URL`. Las imágenes de `recursos/` son referencias de consulta: no se publican con el sitio compilado ni se usan como texturas.
 
+## Varios agentes a la vez
+
+Si trabajan varios agentes (Claude, Codex, Gemini…) en paralelo, deben seguir el protocolo de [AGENTS.md](AGENTS.md). Antes de editar, cada uno inicia una sesión y reclama los archivos y puertos que va a tocar con `node scripts/agentes.mjs`; comparten hallazgos en una bitácora común. `node scripts/agentes.mjs estado` muestra quién trabaja en qué.
+
 ## Visores
 
 `vite.config.js` compila diez páginas. La portada (`index.html`) enlaza al resto.
