@@ -10,7 +10,7 @@ import {
   INACTIVIDAD_MS, iniciarSesion, latido, reclamar, liberar, liberarTodos, anotar, terminar,
   estado, limpiarInactivas, normalizarRecurso, conMutex,
 } from '../scripts/coordinacion-agentes.mjs';
-import {intervaloLatido} from '../scripts/agentes.mjs';
+import {intervaloLatido, grupoActivo} from '../scripts/agentes.mjs';
 
 const T0 = Date.parse('2026-11-27T15:00:00Z');
 const TARDE = T0 + INACTIVIDAD_MS + 1;
@@ -214,9 +214,21 @@ test('varios hilos tomando el mismo reclamo abandonado: exactamente uno gana y l
 test('el intervalo de latido debe ser positivo y menor que la caducidad', () => {
   assert.equal(intervaloLatido(undefined), 10 * 60 * 1000);
   assert.equal(intervaloLatido('50'), 50);
-  for (const malo of ['0', '-5', 'abc', 'Infinity', String(INACTIVIDAD_MS), '2400000']) {
+  for (const malo of ['', ' ', '0', '-5', 'abc', 'Infinity', String(INACTIVIDAD_MS), '2400000']) {
     assert.throws(() => intervaloLatido(malo), /AGENTES_LATIDO_MS/);
   }
+});
+
+test('un grupo con solo procesos zombis no cuenta como activo', () => {
+  // Formato de /proc/<pid>/stat: pid (comm) estado ppid pgrp ...
+  const proc = {'10': '10 (node) Z 1 77 77', '11': '11 (mi (raro) cmd) Z 1 77 77', '12': '12 (bash) S 1 99 99'};
+  const fuente = {listar: () => Object.keys(proc), leer: (pid) => proc[pid]};
+  assert.equal(grupoActivo(77, fuente), false);
+  proc['13'] = '13 (node) R 1 77 77';
+  assert.equal(grupoActivo(77, fuente), true);
+  delete proc['13'];
+  proc['14'] = '14 (node) S 1 77 77';
+  assert.equal(grupoActivo(77, fuente), true);
 });
 
 // ---------- ejecutar (CLI) ----------

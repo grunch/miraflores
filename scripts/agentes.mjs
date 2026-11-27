@@ -15,7 +15,7 @@
  * Códigos de salida: 0 bien, 1 error de uso, 2 conflicto de reclamo; ejecutar devuelve el del comando.
  */
 import {execFileSync, spawn} from 'node:child_process';
-import {realpathSync} from 'node:fs';
+import {readFileSync, readdirSync, realpathSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
@@ -69,8 +69,8 @@ function imprimirEstado() {
 
 /** Intervalo de latido de ejecutar: por defecto 10 min; debe ser positivo y menor que la caducidad. */
 export function intervaloLatido(valor) {
-  if (valor === undefined || valor === '') return LATIDO_RECOMENDADO_MS;
-  const ms = Number(valor);
+  if (valor === undefined) return LATIDO_RECOMENDADO_MS;
+  const ms = String(valor).trim() === '' ? Number.NaN : Number(valor);
   if (!Number.isFinite(ms) || ms <= 0 || ms >= INACTIVIDAD_MS) {
     throw new Error(`AGENTES_LATIDO_MS debe ser un número de milisegundos mayor que 0 y menor que ${INACTIVIDAD_MS}`);
   }
@@ -78,6 +78,26 @@ export function intervaloLatido(valor) {
 }
 
 const dormir = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
+const PROC = {
+  listar: () => readdirSync('/proc').filter((n) => /^\d+$/.test(n)),
+  leer: (pid) => { try { return readFileSync(`/proc/${pid}/stat`, 'utf8'); } catch { return null; } },
+};
+
+/**
+ * ¿Queda algún proceso del grupo que pueda ejecutarse? Los zombis no cuentan: no ejecutan ni escriben,
+ * y en contenedores sin un init que los recoja pueden quedarse para siempre. Fuera de Linux se usa
+ * kill(-pgid, 0), que no distingue zombis.
+ */
+export function grupoActivo(pgid, fuente = process.platform === 'linux' ? PROC : null) {
+  if (!fuente) { try { process.kill(-pgid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } }
+  return fuente.listar().some((pid) => {
+    const stat = fuente.leer(pid);
+    if (!stat) return false;
+    const [estado, , pgrp] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return Number(pgrp) === pgid && estado !== 'Z';
+  });
+}
 const SENALES = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 /**
@@ -93,7 +113,7 @@ async function ejecutar({opciones}) {
   await latido({raiz: RAIZ, id: opciones.id});
   const hijo = spawn(opciones.comando[0], opciones.comando.slice(1), {stdio: 'inherit', detached: true});
   const alGrupo = (senal) => { try { process.kill(-hijo.pid, senal); } catch { /* el grupo ya terminó */ } };
-  const grupoVivo = () => { try { process.kill(-hijo.pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
+  const grupoVivo = () => grupoActivo(hijo.pid);
   for (const senal of SENALES) process.on(senal, alGrupo);
   let perdida = null;
   const salida = new Promise((ok) => {
@@ -110,7 +130,9 @@ async function ejecutar({opciones}) {
         const limite = Date.now() + gracia;
         while (grupoVivo() && Date.now() < limite) await dormir(50);
         if (grupoVivo()) alGrupo('SIGKILL');
-        while (grupoVivo()) await dormir(20);
+        const final = Date.now() + gracia; // SIGKILL no se puede ignorar; el límite solo evita colgarse
+        while (grupoVivo() && Date.now() < final) await dormir(20);
+        if (grupoVivo()) console.error(`Aviso: el grupo ${hijo.pid} sigue vivo tras SIGKILL; revísalo a mano.`);
       })();
     });
   }, cada);
