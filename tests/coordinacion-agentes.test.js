@@ -235,7 +235,15 @@ test('un grupo con solo procesos zombis no cuenta como activo', () => {
 
 const cli = (raiz, args, extra = {}) =>
   spawnSync('node', [CLI, ...args], {env: {...process.env, AGENTES_DIR: raiz, ...extra}, encoding: 'utf8'});
-const vivo = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
+/** ¿Puede el proceso ejecutarse? Un zombi (estado Z en /proc) ya no ejecuta ni escribe. */
+const vivo = (pid) => {
+  try { process.kill(pid, 0); } catch (e) { return e.code !== 'ESRCH'; }
+  if (process.platform !== 'linux') return true;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0] !== 'Z';
+  } catch { return false; }
+};
 const esperarArchivo = async (ruta, ms = 5000) => {
   const limite = Date.now() + ms;
   while (!existsSync(ruta)) { if (Date.now() > limite) throw new Error(`no apareció ${ruta}`); await new Promise((ok) => setTimeout(ok, 20)); }
@@ -270,7 +278,7 @@ test('al perder la sesión, ejecutar detiene todo el grupo, incluso subprocesos 
   const pidNieto = Number(readFileSync(listo, 'utf8'));
   rmSync(join(raiz, 'sesiones', `${id}.json`));
   assert.equal(await new Promise((ok) => hijo.on('exit', ok)), 1);
-  assert.equal(vivo(pidNieto), false, 'el nieto terminó antes de que ejecutar devolviera el control');
+  assert.equal(vivo(pidNieto), false, 'el nieto ya no puede ejecutarse cuando ejecutar devuelve el control');
   await new Promise((ok) => setTimeout(ok, 3200));
   assert.equal(existsSync(marca), false);
 }));
