@@ -33,7 +33,7 @@ const dormir = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
 // ---------- mutex global ----------
 
-function direccionMutex(raiz) {
+export function direccionMutex(raiz) {
   const clave = hash(realpathSync(raiz));
   if (process.platform === 'linux') return {path: `\0agentes-miraflores-${clave}`};
   return {host: '127.0.0.1', port: 40000 + (Number.parseInt(clave.slice(0, 8), 16) % 20000)};
@@ -41,7 +41,9 @@ function direccionMutex(raiz) {
 
 function escuchar(direccion) {
   return new Promise((ok, mal) => {
-    const servidor = createServer();
+    // El mutex solo necesita el bind exclusivo: cualquier conexión se cierra al instante para que
+    // close() no tenga que esperarla.
+    const servidor = createServer((conexion) => conexion.destroy());
     servidor.unref();
     servidor.once('error', mal);
     servidor.listen({...direccion, exclusive: true}, () => ok(servidor));

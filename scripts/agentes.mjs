@@ -106,7 +106,8 @@ const CODIGO_SENAL = {SIGHUP: 129, SIGINT: 130, SIGTERM: 143};
  * Ejecuta el comando en su propio grupo de procesos y emite latidos mientras corre. Si la sesión se
  * pierde o el propio ejecutar recibe SIGINT/SIGTERM/SIGHUP, detiene el grupo entero con la misma
  * rutina (señal, gracia, SIGKILL) y no devuelve el control hasta que no queda ningún proceso que pueda
- * ejecutarse: hasta entonces, nadie debe dar por libres sus recursos.
+ * ejecutarse: hasta entonces, nadie debe dar por libres sus recursos. Si el lanzador sale antes que
+ * sus subprocesos, ejecutar sigue latiendo y los espera.
  */
 async function ejecutar({opciones}) {
   requerir(opciones, 'id');
@@ -138,16 +139,23 @@ async function ejecutar({opciones}) {
     hijo.on('error', (e) => { console.error(`Error: ${e.message}`); ok(1); });
     hijo.on('exit', (codigo, senal) => ok(codigo ?? (senal ? 1 : 0)));
   });
+  const pendientes = new Set();
   const reloj = setInterval(() => {
-    latido({raiz: RAIZ, id: opciones.id}).catch((e) => {
+    const p = latido({raiz: RAIZ, id: opciones.id}).catch((e) => {
       if (parada) return;
       clearInterval(reloj);
       console.error(`Error: ${e.message}. Se detiene el comando porque sus reclamos ya no valen.`);
       detener('SIGTERM', 1);
-    });
+    }).finally(() => pendientes.delete(p));
+    pendientes.add(p);
   }, cada);
   try {
     const codigo = await salida;
+    // El lanzador pudo salir dejando subprocesos activos: siguen siendo el comando, así que se sigue
+    // latiendo y se les espera antes de devolver el control.
+    while (!parada && grupoVivo()) await dormir(50);
+    // Un latido que aún esperaba el mutex puede fallar tarde: se espera antes de elegir el código.
+    await Promise.allSettled([...pendientes]);
     if (parada) { await parada; return codigoParada; }
     return codigo;
   } finally {

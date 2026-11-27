@@ -6,9 +6,10 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {Worker} from 'node:worker_threads';
+import {connect} from 'node:net';
 import {
   INACTIVIDAD_MS, iniciarSesion, latido, reclamar, liberar, liberarTodos, anotar, terminar,
-  estado, limpiarInactivas, normalizarRecurso, conMutex,
+  estado, limpiarInactivas, normalizarRecurso, conMutex, direccionMutex,
 } from '../scripts/coordinacion-agentes.mjs';
 import {intervaloLatido, grupoActivo} from '../scripts/agentes.mjs';
 
@@ -276,7 +277,7 @@ test('al perder la sesión, ejecutar detiene todo el grupo, incluso subprocesos 
   const hijo = spawn('node', [CLI, 'ejecutar', '--id', id, '--', 'node', '-e', padre], {env, stdio: 'ignore'});
   await esperarArchivo(listo); // el comando arrancó de verdad antes de perder la sesión
   const pidNieto = Number(readFileSync(listo, 'utf8'));
-  rmSync(join(raiz, 'sesiones', `${id}.json`));
+  await conMutex(raiz, () => rmSync(join(raiz, 'sesiones', `${id}.json`)));
   assert.equal(await new Promise((ok) => hijo.on('exit', ok)), 1);
   assert.equal(vivo(pidNieto), false, 'el nieto ya no puede ejecutarse cuando ejecutar devuelve el control');
   await new Promise((ok) => setTimeout(ok, 3200));
@@ -292,8 +293,10 @@ test('al caducar la sesión durante el comando, ejecutar lo detiene y falla', ()
     `require('fs').writeFileSync(${JSON.stringify(listo)},'');setTimeout(()=>{},10000)`], {env, stdio: 'ignore'});
   await esperarArchivo(listo);
   const ruta = join(raiz, 'sesiones', `${id}.json`);
-  const s = JSON.parse(readFileSync(ruta, 'utf8'));
-  writeFileSync(ruta, JSON.stringify({...s, latido: new Date(Date.now() - INACTIVIDAD_MS - 1000).toISOString()}));
+  await conMutex(raiz, () => {
+    const s = JSON.parse(readFileSync(ruta, 'utf8'));
+    writeFileSync(ruta, JSON.stringify({...s, latido: new Date(Date.now() - INACTIVIDAD_MS - 1000).toISOString()}));
+  });
   assert.equal(await new Promise((ok) => hijo.on('exit', ok)), 1);
   assert.ok(Date.now() - inicio < 8000, 'no esperó a que el comando terminara solo');
 }));
@@ -315,4 +318,24 @@ test('si ejecutar recibe SIGTERM, detiene todo el grupo antes de salir', () => c
   assert.equal(vivo(pidNieto), false, 'el nieto ya no puede ejecutarse cuando ejecutar sale');
   await new Promise((ok) => setTimeout(ok, 3200));
   assert.equal(existsSync(marca), false);
+}));
+
+test('el mutex no se cuelga si alguien se conecta a su socket mientras se usa', () => conRaiz(async (raiz) => {
+  const inicio = Date.now();
+  await conMutex(raiz, async () => {
+    const cliente = connect(direccionMutex(raiz));
+    cliente.on('error', () => {});
+    await new Promise((ok) => setTimeout(ok, 150));
+  });
+  assert.ok(Date.now() - inicio < 2000, 'close() no esperó a la conexión');
+}));
+
+test('ejecutar espera a los subprocesos que siguen vivos cuando el lanzador sale', () => conRaiz(async (raiz) => {
+  const id = cli(raiz, ['iniciar', '--agente', 'A', '--tarea', 'build']).stdout.trim();
+  const marca = join(raiz, 'escrito-por-el-trabajador');
+  const trabajador = `setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(marca)},'x'),800)`;
+  const lanzador = `require('child_process').spawn('node',['-e',${JSON.stringify(trabajador)}],{stdio:'ignore'}).unref();process.exit(0)`;
+  const r = cli(raiz, ['ejecutar', '--id', id, '--', 'node', '-e', lanzador], {AGENTES_LATIDO_MS: '50'});
+  assert.equal(r.status, 0);
+  assert.equal(existsSync(marca), true, 'ejecutar no volvió hasta que terminó el trabajador');
 }));
