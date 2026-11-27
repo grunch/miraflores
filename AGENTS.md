@@ -42,7 +42,7 @@ node scripts/agentes.mjs latido --id <ID> [--tarea "<tarea actualizada>"]   # ca
 node scripts/agentes.mjs nota --id <ID> "<hallazgo útil para otros agentes>"
 ```
 
-- Una sesión sin latido durante **30 minutos** se considera abandonada y cualquier agente puede tomar sus reclamos. Si una tarea larga (build, validación) te bloquea, da un latido antes de lanzarla.
+- Una sesión sin latido durante **30 minutos** se considera abandonada y cualquier agente puede tomar sus reclamos. **No puede revivir:** `latido` y `reclamar` fallan con «caducada». En ese caso ejecuta `terminar`, revisa con `estado` qué tomaron otros, inicia una sesión nueva y vuelve a reclamar antes de seguir editando. Si una tarea larga (build, validación) te bloquea, da un latido antes de lanzarla.
 - Usa `nota` para compartir lo que otros deberían saber: un error en un dato compartido, un cambio de API, una prueba rota que no es tuya o una decisión tomada. Es la memoria compartida entre agentes. Una línea por nota; nada de secretos.
 - `liberar --id <ID> <rutas>` suelta lo que ya no necesitas.
 

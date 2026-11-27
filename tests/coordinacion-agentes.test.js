@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, rmSync, readFileSync, existsSync} from 'node:fs';
+import {mkdtempSync, rmSync, readFileSync, existsSync, readdirSync, writeFileSync, utimesSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Worker} from 'node:worker_threads';
@@ -135,6 +135,61 @@ test('limpiar retira sesiones inactivas y sus reclamos, no las activas', () => c
   assert.deepEqual(e.sesiones.map((s) => s.id), [b.id]);
   assert.deepEqual(e.reclamos.map((r) => r.recurso), ['docs']);
 }));
+
+test('una sesión caducada no revive con latido ni puede reclamar', () => conRaiz((raiz) => {
+  const a = sesion(raiz, 'A');
+  reclamar({raiz, id: a.id, recursos: ['docs'], ahora: T0});
+  const tarde = T0 + INACTIVIDAD_MS + 1;
+  const b = sesion(raiz, 'B', tarde);
+  assert.deepEqual(reclamar({raiz, id: b.id, recursos: ['docs/test.md'], ahora: tarde}).conflictos, []);
+  assert.throws(() => latido({raiz, id: a.id, ahora: tarde + 1}), /caducada/);
+  assert.throws(() => reclamar({raiz, id: a.id, recursos: ['README.md'], ahora: tarde + 1}), /caducada/);
+  terminar({raiz, id: a.id, resumen: 'cierre tardío', ahora: tarde + 2});
+  assert.deepEqual(estado({raiz, ahora: tarde + 3}).reclamos.map((r) => r.id), [b.id]);
+}));
+
+test('un cerrojo de toma huérfano y antiguo no bloquea el recurso para siempre', () => conRaiz((raiz) => {
+  const a = sesion(raiz, 'A', Date.now() - INACTIVIDAD_MS - 1000);
+  reclamar({raiz, id: a.id, recursos: ['README.md'], ahora: Date.now() - INACTIVIDAD_MS - 1000});
+  const [archivo] = readdirSync(join(raiz, 'reclamos'));
+  const cerrojo = join(raiz, 'reclamos', `${archivo}.toma`);
+  writeFileSync(cerrojo, 'huérfano');
+  const b = sesion(raiz, 'B', Date.now());
+  assert.equal(reclamar({raiz, id: b.id, recursos: ['README.md']}).conflictos.length, 1, 'cerrojo reciente: se respeta');
+  const viejo = new Date(Date.now() - 120000);
+  utimesSync(cerrojo, viejo, viejo);
+  assert.deepEqual(reclamar({raiz, id: b.id, recursos: ['README.md']}).conflictos, []);
+}));
+
+async function enHilos(raiz, ids, recurso) {
+  const modulo = new URL('../scripts/coordinacion-agentes.mjs', import.meta.url).href;
+  const codigo = `
+    const {workerData, parentPort} = require('node:worker_threads');
+    import(workerData.modulo).then(({reclamar}) => {
+      const r = reclamar({raiz: workerData.raiz, id: workerData.id, recursos: [workerData.recurso]});
+      parentPort.postMessage(r.obtenidos.length);
+    });`;
+  return Promise.all(ids.map((id) => new Promise((ok, mal) => {
+    const w = new Worker(codigo, {eval: true, workerData: {raiz, id, modulo, recurso}});
+    w.once('message', ok); w.once('error', mal);
+  })));
+}
+
+test('varios hilos tomando el mismo reclamo abandonado: exactamente uno gana y lo conserva', async () => {
+  for (let ronda = 0; ronda < 5; ronda += 1) {
+    const raiz = mkdtempSync(join(tmpdir(), 'agentes-'));
+    try {
+      const viejo = Date.now() - INACTIVIDAD_MS - 1000;
+      const a = sesion(raiz, 'A', viejo);
+      reclamar({raiz, id: a.id, recursos: ['README.md'], ahora: viejo});
+      const ids = Array.from({length: 8}, (_, i) => sesion(raiz, `agente${i}`, Date.now()).id);
+      const ganados = await enHilos(raiz, ids, 'README.md');
+      assert.equal(ganados.reduce((x, y) => x + y, 0), 1);
+      const ganador = ids[ganados.indexOf(1)];
+      assert.deepEqual(estado({raiz}).reclamos.map((r) => r.id), [ganador]);
+    } finally { rmSync(raiz, {recursive: true, force: true}); }
+  }
+});
 
 test('reclamos simultáneos desde varios hilos: exactamente uno gana', async () => {
   const raiz = mkdtempSync(join(tmpdir(), 'agentes-'));

@@ -5,17 +5,22 @@
  * - sesiones/<id>.json: solo lo escribe su sesión (escritura atómica por rename).
  * - reclamos/<hash>.json: se crea con O_EXCL ('wx'); el sistema de archivos decide quién gana.
  * - bitacora.md: solo se añade con O_APPEND, una escritura por entrada.
- * Una sesión sin latido durante INACTIVIDAD_MS se considera abandonada y sus reclamos pueden tomarse.
+ * Todo borrado de reclamo se hace bajo un cerrojo exclusivo (<reclamo>.toma) y tras volver a comprobar.
+ * Una sesión sin latido durante INACTIVIDAD_MS se considera abandonada: sus reclamos pueden tomarse
+ * y ya no puede revivir; debe terminar e iniciar otra.
  */
 import {
   appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync,
-  rmSync, unlinkSync, writeFileSync,
+  rmSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import {createHash, randomBytes} from 'node:crypto';
 import {join, posix} from 'node:path';
 
 export const INACTIVIDAD_MS = 30 * 60 * 1000;
 export const LATIDO_RECOMENDADO_MS = 10 * 60 * 1000;
+const CERROJO_HUERFANO_MS = 60 * 1000;
+const REINTENTOS_CERROJO = 50;
+const PAUSA_CERROJO_MS = 20;
 const MAX_ENTRADA = 3000;
 
 const dirSesiones = (raiz) => join(raiz, 'sesiones');
@@ -77,6 +82,18 @@ function exigirSesion(raiz, id) {
   return s;
 }
 
+/**
+ * Una sesión caducada no puede revivir: otros agentes pudieron tomar recursos que se solapan con
+ * sus reclamos mientras estuvo inactiva. Debe terminar e iniciar una sesión nueva.
+ */
+function exigirSesionActiva(raiz, id, ahora) {
+  const s = exigirSesion(raiz, id);
+  if (ahora - Date.parse(s.latido) > INACTIVIDAD_MS) {
+    throw new Error(`La sesión «${id}» está caducada (último latido ${s.latido}). Ejecuta «terminar» e inicia una nueva; sus reclamos ya no valen.`);
+  }
+  return s;
+}
+
 export function iniciarSesion({raiz, agente, tarea, rama = null, ahora = Date.now()}) {
   if (!agente || !tarea) throw new TypeError('iniciar necesita agente y tarea');
   mkdirSync(dirSesiones(raiz), {recursive: true});
@@ -90,20 +107,45 @@ export function iniciarSesion({raiz, agente, tarea, rama = null, ahora = Date.no
 }
 
 export function latido({raiz, id, tarea, ahora = Date.now()}) {
-  const s = exigirSesion(raiz, id);
+  const s = exigirSesionActiva(raiz, id, ahora);
   const nueva = {...s, latido: iso(ahora), ...(tarea ? {tarea} : {})};
   escribirAtomico(archivoSesion(raiz, id), nueva);
   return nueva;
 }
 
-/** Retira un reclamo cuyo dueño ya no está activo. Solo un agente consigue el rename. */
-function tomarSiAbandonado(raiz, ruta, id, ahora) {
-  const actual = leerJson(ruta);
-  if (actual && sesionActiva(raiz, actual.id, ahora)) return false;
-  const descarte = `${ruta}.${id}.${sufijo()}.descartado`;
-  try { renameSync(ruta, descarte); } catch (e) { if (e.code === 'ENOENT') return true; throw e; }
-  rmSync(descarte, {force: true});
-  return true;
+/**
+ * Ejecuta fn con el cerrojo exclusivo de un reclamo. Todo borrado de un reclamo pasa por aquí, así
+ * la comprobación y el borrado son una sola transición: nadie borra un reclamo recién creado por otro.
+ * Devuelve null si otro agente tiene el cerrojo. Un cerrojo más antiguo que CERROJO_HUERFANO_MS es de
+ * un proceso que murió en mitad de la transición y se descarta.
+ */
+function conCerrojo(ruta, fn) {
+  const cerrojo = `${ruta}.toma`;
+  for (let intento = 0; intento < 2; intento += 1) {
+    try {
+      writeFileSync(cerrojo, `${process.pid}\n`, {flag: 'wx'});
+      try { return fn(); } finally { rmSync(cerrojo, {force: true}); }
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      let edad;
+      try { edad = Date.now() - statSync(cerrojo).mtimeMs; } catch (s) { if (s.code === 'ENOENT') continue; throw s; }
+      if (edad < CERROJO_HUERFANO_MS) return null;
+      rmSync(cerrojo, {force: true});
+    }
+  }
+  return null;
+}
+
+/** Retira un reclamo cuyo dueño ya no está activo, comprobándolo de nuevo bajo el cerrojo. */
+function tomarSiAbandonado(raiz, ruta, ahora) {
+  const previo = leerJson(ruta);
+  if (previo && sesionActiva(raiz, previo.id, ahora)) return false; // dueño vivo: ni siquiera se toma el cerrojo
+  return conCerrojo(ruta, () => {
+    const actual = leerJson(ruta);
+    if (actual && sesionActiva(raiz, actual.id, ahora)) return false;
+    rmSync(ruta, {force: true});
+    return true;
+  }) ?? false;
 }
 
 function crearReclamo(raiz, recurso, id, ahora) {
@@ -114,15 +156,23 @@ function crearReclamo(raiz, recurso, id, ahora) {
       if (e.code !== 'EEXIST') throw e;
       const actual = leerJson(ruta);
       if (actual?.id === id) return {ok: true, previo: true};
-      if (!tomarSiAbandonado(raiz, ruta, id, ahora)) return {ok: false, dueno: actual?.id ?? 'desconocido'};
+      if (!tomarSiAbandonado(raiz, ruta, ahora)) return {ok: false, dueno: actual?.id ?? 'desconocido'};
     }
   }
   return {ok: false, dueno: leerJson(ruta)?.id ?? 'desconocido'};
 }
 
+const pausa = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
 function borrarReclamoPropio(raiz, recurso, id) {
   const ruta = archivoReclamo(raiz, recurso);
-  if (leerJson(ruta)?.id === id) rmSync(ruta, {force: true});
+  // El cerrojo solo se retiene microsegundos: se reintenta en lugar de omitir el borrado en silencio.
+  for (let intento = 0; intento < REINTENTOS_CERROJO; intento += 1) {
+    const hecho = conCerrojo(ruta, () => { if (leerJson(ruta)?.id === id) rmSync(ruta, {force: true}); return true; });
+    if (hecho) return;
+    pausa(PAUSA_CERROJO_MS);
+  }
+  throw new Error(`No se pudo liberar «${recurso}»: su cerrojo sigue ocupado. Reintenta en unos segundos.`);
 }
 
 function solapamientos(raiz, id, pedidos, ahora) {
@@ -137,7 +187,7 @@ function solapamientos(raiz, id, pedidos, ahora) {
 
 /** Reclama todos los recursos o ninguno. Devuelve {obtenidos, conflictos}. */
 export function reclamar({raiz, id, recursos, ahora = Date.now()}) {
-  exigirSesion(raiz, id);
+  exigirSesionActiva(raiz, id, ahora);
   const pedidos = [...new Set(recursos.map(normalizarRecurso))];
   const nuevos = [];
   let conflictos = [];
@@ -178,7 +228,7 @@ export function limpiarInactivas({raiz, ahora = Date.now()}) {
   for (const s of listarJson(dirSesiones(raiz))) {
     if (sesionActiva(raiz, s.id, ahora)) continue;
     for (const r of listarJson(dirReclamos(raiz))) {
-      if (r.id === s.id) tomarSiAbandonado(raiz, archivoReclamo(raiz, r.recurso), 'limpieza', ahora);
+      if (r.id === s.id) tomarSiAbandonado(raiz, archivoReclamo(raiz, r.recurso), ahora);
     }
     rmSync(archivoSesion(raiz, s.id), {force: true});
     anotar({raiz, id: 'limpieza', mensaje: `retiró la sesión inactiva ${s.id} (último latido ${s.latido})`, ahora});
