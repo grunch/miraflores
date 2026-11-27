@@ -10,11 +10,11 @@ La coordinación se hace con `node scripts/agentes.mjs`. **No edites a mano los 
 
 El script sí garantiza que los propios archivos de coordinación nunca tengan dos escritores:
 
-- cada sesión escribe solo su propio archivo;
-- cada reclamo se publica completo y de forma atómica y exclusiva, así que si dos agentes reclaman lo mismo a la vez, el sistema de archivos decide quién gana;
+- toda modificación del estado ocurre dentro de un mutex global que el sistema operativo libera si el proceso muere, así que si dos agentes reclaman lo mismo a la vez, solo uno lo obtiene;
+- cada archivo se escribe de forma atómica: nunca se ve a medias;
 - la bitácora solo admite añadir entradas, nunca editarlas.
 
-Por eso no hay que esperar ni reintentar escrituras: si un reclamo falla, es que otro agente tiene el recurso.
+Por eso no hay que esperar ni reintentar: si un reclamo falla, es que otro agente tiene el recurso.
 
 Los datos viven en `.git/agentes/`, compartido por todos los worktrees y nunca versionado.
 
@@ -46,7 +46,7 @@ node scripts/agentes.mjs latido --id <ID> [--tarea "<tarea actualizada>"]   # ca
 node scripts/agentes.mjs nota --id <ID> "<hallazgo útil para otros agentes>"
 ```
 
-- Una sesión sin latido durante **30 minutos** se considera abandonada y cualquier agente puede tomar sus reclamos. **No puede revivir:** `latido` y `reclamar` fallan con «caducada». En ese caso ejecuta `terminar`, revisa con `estado` qué tomaron otros, inicia una sesión nueva y vuelve a reclamar antes de seguir editando.
+- Una sesión sin latido durante **30 minutos** se considera abandonada y cualquier agente puede tomar sus reclamos. **No puede revivir:** `latido` y `reclamar` fallan con «caducada». En ese caso ejecuta `terminar`, revisa con `estado` qué tomaron otros, inicia una sesión nueva y vuelve a reclamar. **Después de volver a reclamar, relee cada archivo desde el disco** y reconcilia tus cambios pendientes con su contenido actual antes de escribir: mientras tu sesión estuvo caducada, otro agente pudo editarlo y liberarlo.
 - **Comandos largos** (build, validadores, capturas): lánzalos con `node scripts/agentes.mjs ejecutar --id <ID> -- <comando>`. Así se emiten latidos cada 10 minutos mientras corren y se devuelve el código de salida del comando. Un único latido antes de lanzarlos no basta si duran más de 30 minutos. Si la sesión caduca mientras corre (por ejemplo, porque la máquina se suspendió), `ejecutar` detiene el comando y falla: inicia otra sesión y vuelve a reclamar antes de seguir.
 - Usa `nota` para compartir lo que otros deberían saber: un error en un dato compartido, un cambio de API, una prueba rota que no es tuya o una decisión tomada. Es la memoria compartida entre agentes. Una línea por nota; nada de secretos.
 - `liberar --id <ID> <rutas>` suelta lo que ya no necesitas.

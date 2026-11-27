@@ -15,6 +15,7 @@
  * Códigos de salida: 0 bien, 1 error de uso, 2 conflicto de reclamo; ejecutar devuelve el del comando.
  */
 import {execFileSync, spawn} from 'node:child_process';
+import {realpathSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
@@ -66,72 +67,104 @@ function imprimirEstado() {
   for (const linea of bitacora) console.log(linea);
 }
 
+/** Intervalo de latido de ejecutar: por defecto 10 min; debe ser positivo y menor que la caducidad. */
+export function intervaloLatido(valor) {
+  if (valor === undefined || valor === '') return LATIDO_RECOMENDADO_MS;
+  const ms = Number(valor);
+  if (!Number.isFinite(ms) || ms <= 0 || ms >= INACTIVIDAD_MS) {
+    throw new Error(`AGENTES_LATIDO_MS debe ser un número de milisegundos mayor que 0 y menor que ${INACTIVIDAD_MS}`);
+  }
+  return ms;
+}
+
+const dormir = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const SENALES = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+
+/**
+ * Ejecuta el comando en su propio grupo de procesos y emite latidos mientras corre. Si la sesión
+ * caduca o desaparece, detiene el grupo entero (SIGTERM y, tras la gracia, SIGKILL) y no termina
+ * hasta que no quede ningún proceso del grupo.
+ */
+async function ejecutar({opciones}) {
+  requerir(opciones, 'id');
+  if (!opciones.comando?.length) throw new Error('Falta el comando tras «--»');
+  const cada = intervaloLatido(process.env.AGENTES_LATIDO_MS);
+  const gracia = Number(process.env.AGENTES_GRACIA_MS) || 5000;
+  await latido({raiz: RAIZ, id: opciones.id});
+  const hijo = spawn(opciones.comando[0], opciones.comando.slice(1), {stdio: 'inherit', detached: true});
+  const alGrupo = (senal) => { try { process.kill(-hijo.pid, senal); } catch { /* el grupo ya terminó */ } };
+  const grupoVivo = () => { try { process.kill(-hijo.pid, 0); return true; } catch (e) { return e.code !== 'ESRCH'; } };
+  for (const senal of SENALES) process.on(senal, alGrupo);
+  let perdida = null;
+  const salida = new Promise((ok) => {
+    hijo.on('error', (e) => { console.error(`Error: ${e.message}`); ok(1); });
+    hijo.on('exit', (codigo, senal) => ok(codigo ?? (senal ? 1 : 0)));
+  });
+  const reloj = setInterval(() => {
+    latido({raiz: RAIZ, id: opciones.id}).catch((e) => {
+      if (perdida) return;
+      clearInterval(reloj);
+      console.error(`Error: ${e.message}. Se detiene el comando porque sus reclamos ya no valen.`);
+      perdida = (async () => {
+        alGrupo('SIGTERM');
+        const limite = Date.now() + gracia;
+        while (grupoVivo() && Date.now() < limite) await dormir(50);
+        if (grupoVivo()) alGrupo('SIGKILL');
+        while (grupoVivo()) await dormir(20);
+      })();
+    });
+  }, cada);
+  try {
+    const codigo = await salida;
+    if (perdida) { await perdida; return 1; }
+    return codigo;
+  } finally {
+    clearInterval(reloj);
+    for (const senal of SENALES) process.off(senal, alGrupo);
+  }
+}
+
 const comandos = {
   estado: () => imprimirEstado(),
-  iniciar: ({opciones}) => {
+  iniciar: async ({opciones}) => {
     requerir(opciones, 'agente', 'tarea');
-    const s = iniciarSesion({raiz: RAIZ, agente: opciones.agente, tarea: opciones.tarea, rama: opciones.rama ?? null, directorio: process.cwd()});
+    const s = await iniciarSesion({raiz: RAIZ, agente: opciones.agente, tarea: opciones.tarea, rama: opciones.rama ?? null, directorio: process.cwd()});
     console.log(s.id);
   },
-  reclamar: ({opciones, sueltos}) => {
+  reclamar: async ({opciones, sueltos}) => {
     requerir(opciones, 'id');
-    const r = reclamar({raiz: RAIZ, id: opciones.id, recursos: sueltos});
+    const r = await reclamar({raiz: RAIZ, id: opciones.id, recursos: sueltos});
     if (!r.conflictos.length) { console.log(`Reclamado: ${r.obtenidos.join(', ')}`); return 0; }
     for (const c of r.conflictos) console.error(`CONFLICTO: ${c.recurso} lo tiene ${c.dueno}${c.con ? ` (por ${c.con})` : ''}`);
     console.error('No se reclamó nada. Elige otra tarea, coordina por la bitácora o espera a que se libere.');
     return 2;
   },
-  liberar: ({opciones, sueltos}) => { requerir(opciones, 'id'); liberar({raiz: RAIZ, id: opciones.id, recursos: sueltos}); },
-  latido: ({opciones}) => { requerir(opciones, 'id'); latido({raiz: RAIZ, id: opciones.id, tarea: opciones.tarea}); },
-  nota: ({opciones, sueltos}) => {
+  liberar: async ({opciones, sueltos}) => { requerir(opciones, 'id'); await liberar({raiz: RAIZ, id: opciones.id, recursos: sueltos}); },
+  latido: async ({opciones}) => { requerir(opciones, 'id'); await latido({raiz: RAIZ, id: opciones.id, tarea: opciones.tarea}); },
+  nota: async ({opciones, sueltos}) => {
     requerir(opciones, 'id');
     if (!sueltos.length) throw new Error('Falta el mensaje');
-    anotar({raiz: RAIZ, id: opciones.id, mensaje: sueltos.join(' ')});
+    await anotar({raiz: RAIZ, id: opciones.id, mensaje: sueltos.join(' ')});
   },
-  terminar: ({opciones}) => { requerir(opciones, 'id'); terminar({raiz: RAIZ, id: opciones.id, resumen: opciones.resumen}); },
-  ejecutar: ({opciones}) => {
-    requerir(opciones, 'id');
-    if (!opciones.comando?.length) throw new Error('Falta el comando tras «--»');
-    const cada = Number(process.env.AGENTES_LATIDO_MS) || LATIDO_RECOMENDADO_MS;
-    latido({raiz: RAIZ, id: opciones.id});
-    return new Promise((resolver) => {
-      let perdida = false;
-      // Grupo de procesos propio: al perder la sesión se detiene el comando con todos sus subprocesos.
-      const hijo = spawn(opciones.comando[0], opciones.comando.slice(1), {stdio: 'inherit', detached: true});
-      const alGrupo = (senal) => { try { process.kill(-hijo.pid, senal); } catch { /* el grupo ya terminó */ } };
-      const reenviar = (senal) => alGrupo(senal);
-      for (const senal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(senal, reenviar);
-      // Si la sesión caduca o desaparece, sus reclamos dejan de valer: se detiene el comando.
-      const reloj = setInterval(() => {
-        try { latido({raiz: RAIZ, id: opciones.id}); } catch (e) {
-          perdida = true;
-          clearInterval(reloj);
-          console.error(`Error: ${e.message}. Se detiene el comando porque sus reclamos ya no valen.`);
-          alGrupo('SIGTERM');
-          setTimeout(() => alGrupo('SIGKILL'), 5000).unref();
-        }
-      }, cada);
-      const fin = (codigo) => {
-        clearInterval(reloj);
-        for (const senal of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.off(senal, reenviar);
-        resolver(perdida ? 1 : codigo);
-      };
-      hijo.on('error', (e) => { console.error(`Error: ${e.message}`); fin(1); });
-      hijo.on('exit', (codigo, senal) => fin(codigo ?? (senal ? 1 : 0)));
-    });
-  },
-  limpiar: () => { const r = limpiarInactivas({raiz: RAIZ}); console.log(r.length ? `Retiradas: ${r.join(', ')}` : 'Nada que limpiar'); },
+  terminar: async ({opciones}) => { requerir(opciones, 'id'); await terminar({raiz: RAIZ, id: opciones.id, resumen: opciones.resumen}); },
+  ejecutar,
+  limpiar: async () => { const r = await limpiarInactivas({raiz: RAIZ}); console.log(r.length ? `Retiradas: ${r.join(', ')}` : 'Nada que limpiar'); },
 };
 
-const [nombre, ...resto] = process.argv.slice(2);
-const comando = comandos[nombre ?? 'estado'];
-if (!comando) {
-  console.error(`Comando desconocido «${nombre}». Usa: ${Object.keys(comandos).join(', ')}`);
-  process.exit(1);
+async function principal() {
+  const [nombre, ...resto] = process.argv.slice(2);
+  const comando = comandos[nombre ?? 'estado'];
+  if (!comando) {
+    console.error(`Comando desconocido «${nombre}». Usa: ${Object.keys(comandos).join(', ')}`);
+    return 1;
+  }
+  try { return (await comando(analizar(resto))) ?? 0; } catch (e) {
+    console.error(`Error: ${e.message}`);
+    return 1;
+  }
 }
-try {
-  process.exitCode = (await comando(analizar(resto))) ?? 0;
-} catch (e) {
-  console.error(`Error: ${e.message}`);
-  process.exitCode = 1;
+
+// Importable desde las pruebas sin ejecutar la CLI.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exitCode = await principal();
 }
