@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync, rmSync, readFileSync, existsSync, readdirSync, writeFileSync, utimesSync} from 'node:fs';
+import {mkdtempSync, rmSync, readFileSync, existsSync, readdirSync, writeFileSync, utimesSync, chmodSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Worker} from 'node:worker_threads';
@@ -159,6 +160,54 @@ test('un cerrojo de toma huérfano y antiguo no bloquea el recurso para siempre'
   const viejo = new Date(Date.now() - 120000);
   utimesSync(cerrojo, viejo, viejo);
   assert.deepEqual(reclamar({raiz, id: b.id, recursos: ['README.md']}).conflictos, []);
+}));
+
+test('un reclamo ilegible y reciente cuenta como ocupado; solo se toma cuando es antiguo', () => conRaiz((raiz) => {
+  const a = sesion(raiz, 'A');
+  reclamar({raiz, id: a.id, recursos: ['README.md'], ahora: T0});
+  const [archivo] = readdirSync(join(raiz, 'reclamos'));
+  const ruta = join(raiz, 'reclamos', archivo);
+  writeFileSync(ruta, ''); // como lo vería otro agente si la publicación no fuese atómica
+  const b = sesion(raiz, 'B', Date.now());
+  assert.equal(reclamar({raiz, id: b.id, recursos: ['README.md']}).conflictos.length, 1);
+  const viejo = new Date(Date.now() - 120000);
+  utimesSync(ruta, viejo, viejo);
+  assert.deepEqual(reclamar({raiz, id: b.id, recursos: ['README.md']}).conflictos, []);
+}));
+
+test('los reclamos se publican completos: nunca queda un temporal ni un archivo vacío', () => conRaiz((raiz) => {
+  const a = sesion(raiz, 'A');
+  reclamar({raiz, id: a.id, recursos: ['README.md', 'docs', 'puerto:5174'], ahora: T0});
+  const nombres = readdirSync(join(raiz, 'reclamos'));
+  assert.equal(nombres.length, 3);
+  for (const n of nombres) assert.equal(JSON.parse(readFileSync(join(raiz, 'reclamos', n), 'utf8')).id, a.id);
+}));
+
+test('si falla el latido final, reclamar deshace los reclamos nuevos y relanza el error', {skip: process.getuid?.() === 0}, () => conRaiz((raiz) => {
+  const a = sesion(raiz, 'A');
+  reclamar({raiz, id: a.id, recursos: ['docs'], ahora: T0});
+  chmodSync(join(raiz, 'sesiones'), 0o500);
+  try {
+    assert.throws(() => reclamar({raiz, id: a.id, recursos: ['README.md'], ahora: T0}), /EACCES/);
+  } finally { chmodSync(join(raiz, 'sesiones'), 0o700); }
+  assert.deepEqual(estado({raiz, ahora: T0}).reclamos.map((r) => r.recurso), ['docs']);
+}));
+
+test('limpiar no retira una sesión cuyo latido está en curso', () => conRaiz((raiz) => {
+  const a = sesion(raiz, 'A', Date.now() - INACTIVIDAD_MS - 1000);
+  writeFileSync(join(raiz, 'sesiones', `${a.id}.json.toma`), 'latido en curso');
+  assert.deepEqual(limpiarInactivas({raiz}), []);
+  assert.equal(estado({raiz}).sesiones.length, 1);
+}));
+
+test('ejecutar mantiene el latido mientras corre un comando largo y devuelve su código', () => conRaiz((raiz) => {
+  const cli = new URL('../scripts/agentes.mjs', import.meta.url).pathname;
+  const env = {...process.env, AGENTES_DIR: raiz, AGENTES_LATIDO_MS: '50'};
+  const id = spawnSync('node', [cli, 'iniciar', '--agente', 'A', '--tarea', 'build'], {env, encoding: 'utf8'}).stdout.trim();
+  const antes = estado({raiz}).sesiones[0].latido;
+  const r = spawnSync('node', [cli, 'ejecutar', '--id', id, '--', 'node', '-e', 'setTimeout(()=>process.exit(3),400)'], {env, encoding: 'utf8'});
+  assert.equal(r.status, 3);
+  assert.ok(estado({raiz}).sesiones[0].latido > antes, 'hubo latidos durante el comando');
 }));
 
 async function enHilos(raiz, ids, recurso) {

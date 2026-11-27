@@ -4,10 +4,14 @@ Este proyecto puede tener **varios agentes trabajando a la vez** (Claude, Codex,
 
 ## Protocolo de coordinación
 
-La coordinación se hace con `node scripts/agentes.mjs`. **No edites a mano los archivos de coordinación.** El script garantiza que dos agentes nunca escriban el mismo archivo:
+La coordinación se hace con `node scripts/agentes.mjs`. **No edites a mano los archivos de coordinación.**
+
+**Es un protocolo cooperativo:** nada impide físicamente editar un archivo sin reclamarlo. Los reclamos solo protegen a los agentes que siguen este protocolo, así que cumplirlo es obligatorio.
+
+El script sí garantiza que los propios archivos de coordinación nunca tengan dos escritores:
 
 - cada sesión escribe solo su propio archivo;
-- cada reclamo es un archivo que se crea de forma atómica y exclusiva, así que si dos agentes reclaman lo mismo a la vez, el sistema de archivos decide quién gana;
+- cada reclamo se publica completo y de forma atómica y exclusiva, así que si dos agentes reclaman lo mismo a la vez, el sistema de archivos decide quién gana;
 - la bitácora solo admite añadir entradas, nunca editarlas.
 
 Por eso no hay que esperar ni reintentar escrituras: si un reclamo falla, es que otro agente tiene el recurso.
@@ -42,7 +46,8 @@ node scripts/agentes.mjs latido --id <ID> [--tarea "<tarea actualizada>"]   # ca
 node scripts/agentes.mjs nota --id <ID> "<hallazgo útil para otros agentes>"
 ```
 
-- Una sesión sin latido durante **30 minutos** se considera abandonada y cualquier agente puede tomar sus reclamos. **No puede revivir:** `latido` y `reclamar` fallan con «caducada». En ese caso ejecuta `terminar`, revisa con `estado` qué tomaron otros, inicia una sesión nueva y vuelve a reclamar antes de seguir editando. Si una tarea larga (build, validación) te bloquea, da un latido antes de lanzarla.
+- Una sesión sin latido durante **30 minutos** se considera abandonada y cualquier agente puede tomar sus reclamos. **No puede revivir:** `latido` y `reclamar` fallan con «caducada». En ese caso ejecuta `terminar`, revisa con `estado` qué tomaron otros, inicia una sesión nueva y vuelve a reclamar antes de seguir editando.
+- **Comandos largos** (build, validadores, capturas): lánzalos con `node scripts/agentes.mjs ejecutar --id <ID> -- <comando>`. Así se emiten latidos cada 10 minutos mientras corren y se devuelve el código de salida del comando. Un único latido antes de lanzarlos no basta si duran más de 30 minutos.
 - Usa `nota` para compartir lo que otros deberían saber: un error en un dato compartido, un cambio de API, una prueba rota que no es tuya o una decisión tomada. Es la memoria compartida entre agentes. Una línea por nota; nada de secretos.
 - `liberar --id <ID> <rutas>` suelta lo que ya no necesitas.
 
@@ -59,7 +64,8 @@ Esto libera tus reclamos, borra tu sesión y deja el resumen en la bitácora. Si
 - **Preferible:** trabaja en tu propio worktree y rama (`git worktree add ../miraflores-<tarea> -b <rama>`). La coordinación sigue funcionando porque `.git/agentes` es común. Aun así, reclama los archivos: dos ramas que tocan lo mismo acaban en conflicto de fusión.
 - En un directorio compartido, haz stage **solo de tus archivos reclamados** (`git add <rutas>`). Nunca uses `git add -A`, `git add .`, `git commit -a`, `git stash`, `git checkout -- .`, `git reset --hard` ni `git clean`: arrastran o destruyen el trabajo de otros agentes.
 - Si git informa de `index.lock`, otro agente está ejecutando git. Espera unos segundos y reintenta; no borres el lock.
-- Antes de hacer push, `git pull --rebase`. No reescribas historia publicada.
+- **Operaciones que cambian el árbol de trabajo** (`git pull`, `rebase`, `merge`, `checkout`/`switch` de rama): en un directorio compartido pueden modificar archivos que otro agente ya leyó y que luego sobrescribiría con su copia vieja. Hazlas solo en tu propio worktree. Si no hay más remedio que hacerlas en el directorio compartido, reclama antes `git:arbol` y comprueba con `estado` que no hay otras sesiones activas en ese directorio; si las hay, coordina con `nota` y espera.
+- Antes de hacer push, actualiza tu rama con `git pull --rebase` desde tu worktree. No reescribas historia publicada.
 - Mensajes de commit en español con prefijo convencional: `feat:`, `fix:`, `docs:`, `test:`…
 
 ## Contexto del proyecto

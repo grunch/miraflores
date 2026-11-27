@@ -7,17 +7,18 @@
  *   node scripts/agentes.mjs reclamar --id ID ruta|puerto:NNNN ...
  *   node scripts/agentes.mjs liberar  --id ID ruta ...
  *   node scripts/agentes.mjs latido   --id ID [--tarea "..."]
+ *   node scripts/agentes.mjs ejecutar --id ID -- <comando largo> [args]   (late mientras corre)
  *   node scripts/agentes.mjs nota     --id ID "mensaje para los demás agentes"
  *   node scripts/agentes.mjs terminar --id ID --resumen "..."
  *   node scripts/agentes.mjs limpiar
  *
- * Códigos de salida: 0 bien, 1 error de uso, 2 conflicto de reclamo.
+ * Códigos de salida: 0 bien, 1 error de uso, 2 conflicto de reclamo; ejecutar devuelve el del comando.
  */
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawn} from 'node:child_process';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
-  INACTIVIDAD_MS, anotar, estado, iniciarSesion, latido, liberar, limpiarInactivas, reclamar, terminar,
+  INACTIVIDAD_MS, LATIDO_RECOMENDADO_MS, anotar, estado, iniciarSesion, latido, liberar, limpiarInactivas, reclamar, terminar,
 } from './coordinacion-agentes.mjs';
 
 /** Directorio compartido por todos los worktrees: <git-common-dir>/agentes; sin git, .agentes/. */
@@ -38,6 +39,7 @@ function analizar(argv) {
   const opciones = {};
   const sueltos = [];
   for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--') { opciones.comando = argv.slice(i + 1); break; }
     if (argv[i].startsWith('--')) { opciones[argv[i].slice(2)] = argv[i + 1]; i += 1; } else sueltos.push(argv[i]);
   }
   return {opciones, sueltos};
@@ -87,6 +89,21 @@ const comandos = {
     anotar({raiz: RAIZ, id: opciones.id, mensaje: sueltos.join(' ')});
   },
   terminar: ({opciones}) => { requerir(opciones, 'id'); terminar({raiz: RAIZ, id: opciones.id, resumen: opciones.resumen}); },
+  ejecutar: ({opciones}) => {
+    requerir(opciones, 'id');
+    if (!opciones.comando?.length) throw new Error('Falta el comando tras «--»');
+    const cada = Number(process.env.AGENTES_LATIDO_MS) || LATIDO_RECOMENDADO_MS;
+    latido({raiz: RAIZ, id: opciones.id});
+    return new Promise((resolver) => {
+      const reloj = setInterval(() => {
+        try { latido({raiz: RAIZ, id: opciones.id}); } catch (e) { console.error(`Aviso: latido fallido: ${e.message}`); }
+      }, cada);
+      const hijo = spawn(opciones.comando[0], opciones.comando.slice(1), {stdio: 'inherit'});
+      const fin = (codigo) => { clearInterval(reloj); resolver(codigo); };
+      hijo.on('error', (e) => { console.error(`Error: ${e.message}`); fin(1); });
+      hijo.on('exit', (codigo, senal) => fin(codigo ?? (senal ? 1 : 0)));
+    });
+  },
   limpiar: () => { const r = limpiarInactivas({raiz: RAIZ}); console.log(r.length ? `Retiradas: ${r.join(', ')}` : 'Nada que limpiar'); },
 };
 
@@ -97,7 +114,7 @@ if (!comando) {
   process.exit(1);
 }
 try {
-  process.exitCode = comando(analizar(resto)) ?? 0;
+  process.exitCode = (await comando(analizar(resto))) ?? 0;
 } catch (e) {
   console.error(`Error: ${e.message}`);
   process.exitCode = 1;
