@@ -1,0 +1,57 @@
+{
+  "errores": [],
+  "epocas": [
+    {
+      "anio": 1889,
+      "fase": "Edificio en pie",
+      "huellaInterpretativa": true,
+      "huellaDeReferencia": null,
+      "areaCartografiada": false,
+      "conteo": {
+        "tumbas": 74,
+        "panteonesInterpretativos": 6,
+        "arboles": 12
+      },
+      "triangulos": 2535
+    },
+    {
+      "anio": 1911,
+      "fase": "Edificio en pie",
+      "huellaInterpretativa": true,
+      "huellaDeReferencia": null,
+      "areaCartografiada": false,
+      "conteo": {
+        "tumbas": 74,
+        "panteonesInterpretativos": 6,
+        "arboles": 12
+      },
+      "triangulos": 2535
+    },
+    {
+      "anio": 1936,
+      "fase": "Edificio en pie",
+      "huellaInterpretativa": false,
+      "huellaDeReferencia": 1936,
+      "areaCartografiada": true,
+      "conteo": {
+        "tumbas": 350,
+        "panteonesInterpretativos": 23,
+        "arboles": 27
+      },
+      "triangulos": 8097
+    },
+    {
+      "anio": 1946,
+      "fase": "Edificio en pie",
+      "huellaInterpretativa": true,
+      "huellaDeReferencia": 1936,
+      "areaCartografiada": false,
+      "conteo": {
+        "tumbas": 350,
+        "panteonesInterpretativos": 23,
+        "arboles": 27
+      },
+      "triangulos": 8097
+    }
+  ]
+}

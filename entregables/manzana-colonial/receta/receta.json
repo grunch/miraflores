@@ -1,0 +1,18 @@
+{
+  "version": 4,
+  "cantidadCasas": 16,
+  "semilla": "caracas-1772-01",
+  "lados": [
+    96,
+    96,
+    96,
+    96
+  ],
+  "angulos": [
+    90,
+    90,
+    90,
+    90
+  ],
+  "vegetacion": 0.65
+}

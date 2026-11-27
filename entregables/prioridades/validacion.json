@@ -1,0 +1,165 @@
+{
+  "errores": [],
+  "resultados": [
+    {
+      "id": "metropolitano",
+      "etapa": {
+        "id": "metropolitano",
+        "anio": 1911,
+        "presente": true,
+        "fase": "Edificio en pie"
+      },
+      "render": {
+        "frame": 11,
+        "calls": 21,
+        "triangles": 25338,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "nuevo-circo",
+      "etapa": {
+        "id": "nuevo-circo",
+        "anio": 1936,
+        "presente": true,
+        "fase": "Edificio en pie"
+      },
+      "render": {
+        "frame": 11,
+        "calls": 21,
+        "triangles": 55750,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "rotunda",
+      "etapa": {
+        "id": "rotunda",
+        "anio": 1911,
+        "presente": true,
+        "fase": "Recinto penitenciario anterior a la demolición"
+      },
+      "render": {
+        "frame": 11,
+        "calls": 17,
+        "triangles": 46378,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "hijos-dios",
+      "etapa": {
+        "id": "hijos-dios",
+        "anio": 1911,
+        "presente": true,
+        "fase": "Recinto cerrado al uso, con estructuras todavía en pie"
+      },
+      "render": {
+        "frame": 11,
+        "calls": 15,
+        "triangles": 9758,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "cementerio-sur",
+      "etapa": {
+        "id": "cementerio-sur",
+        "anio": 1911,
+        "presente": true,
+        "fase": "Edificio en pie"
+      },
+      "render": {
+        "frame": 11,
+        "calls": 7,
+        "triangles": 2535,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "santa-rosalia",
+      "etapa": {
+        "id": "santa-rosalia",
+        "anio": 1911,
+        "presente": true,
+        "fase": "Edificio en pie"
+      },
+      "render": {
+        "frame": 11,
+        "calls": 19,
+        "triangles": 20546,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "san-juan",
+      "etapa": {
+        "id": "san-juan",
+        "anio": 1911,
+        "presente": true,
+        "fase": "Edificio en pie"
+      },
+      "render": {
+        "frame": 11,
+        "calls": 23,
+        "triangles": 15288,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "san-jose",
+      "etapa": {
+        "id": "san-jose",
+        "anio": 1911,
+        "presente": true,
+        "fase": "Edificio en pie"
+      },
+      "render": {
+        "frame": 11,
+        "calls": 19,
+        "triangles": 13774,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "san-agustin",
+      "etapa": {
+        "id": "san-agustin",
+        "anio": 1936,
+        "presente": true,
+        "fase": "Edificio en pie"
+      },
+      "render": {
+        "frame": 11,
+        "calls": 21,
+        "triangles": 25646,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "hospital-vargas",
+      "etapa": {
+        "id": "hospital-vargas",
+        "anio": 1911,
+        "presente": true,
+        "fase": "Edificio en pie"
+      },
+      "render": {
+        "frame": 11,
+        "calls": 17,
+        "triangles": 24082,
+        "points": 0,
+        "lines": 0
+      }
+    }
+  ]
+}

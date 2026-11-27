@@ -1,0 +1,78 @@
+{
+  "vistas": {
+    "centro": {
+      "x": 0,
+      "z": 0,
+      "dist": 650,
+      "yaw": 0.3,
+      "pitch": 1.15
+    },
+    "general": {
+      "x": 0,
+      "z": -200,
+      "dist": 3500,
+      "yaw": 0,
+      "pitch": 1.3
+    },
+    "norte": {
+      "x": -600,
+      "z": -1300,
+      "dist": 800,
+      "yaw": 0.3,
+      "pitch": 1.1
+    },
+    "oeste": {
+      "x": -1300,
+      "z": 550,
+      "dist": 850,
+      "yaw": 0.3,
+      "pitch": 1.1
+    }
+  },
+  "errores": {
+    "antes": [],
+    "despues": []
+  },
+  "comparacion": {
+    "1-centro": {
+      "porcentajeCanales": 0,
+      "diferenciaMedia": 0
+    },
+    "1-general": {
+      "porcentajeCanales": 0.00034722222222222224,
+      "diferenciaMedia": 0.000005208333333333333
+    },
+    "2-centro": {
+      "porcentajeCanales": 69.80234375,
+      "diferenciaMedia": 25.347818287037036
+    },
+    "2-general": {
+      "porcentajeCanales": 35.518113425925925,
+      "diferenciaMedia": 8.987673611111111
+    },
+    "3-centro": {
+      "porcentajeCanales": 0,
+      "diferenciaMedia": 0
+    },
+    "3-general": {
+      "porcentajeCanales": 0.00031828703703703706,
+      "diferenciaMedia": 0.000024305555555555554
+    },
+    "4-centro": {
+      "porcentajeCanales": 9.759201388888888,
+      "diferenciaMedia": 3.6483370949074074
+    },
+    "4-general": {
+      "porcentajeCanales": 86.46571180555556,
+      "diferenciaMedia": 76.42318055555556
+    },
+    "5-centro": {
+      "porcentajeCanales": 90.53938078703703,
+      "diferenciaMedia": 72.2686400462963
+    },
+    "5-general": {
+      "porcentajeCanales": 89.78657407407407,
+      "diferenciaMedia": 57.526066550925925
+    }
+  }
+}

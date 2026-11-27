@@ -1,0 +1,2 @@
+import {defineConfig} from 'vite';
+export default defineConfig({cacheDir:'.vite-miraflores',build:{rollupOptions:{input:{estudio:'index.html',prioridades:'prioridades.html',puentes:'puentes-guaire.html',silencio:'el-silencio.html',teatro:'teatro-municipal.html',casaAmarilla:'casa-amarilla.html',capitolio:'capitolio.html',arzobispal:'palacio-arzobispal.html',sanFrancisco:'san-francisco.html',manzana:'manzana-colonial.html'}}}});

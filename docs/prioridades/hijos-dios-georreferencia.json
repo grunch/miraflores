@@ -1,0 +1,178 @@
+{
+  "fuente": "Mosaico DCN1936; lectura manual del dibujo, no mensura catastral",
+  "recortePx": [
+    8380,
+    3370,
+    9020,
+    4010
+  ],
+  "origenPx": [
+    8620,
+    3670
+  ],
+  "ejeX": [
+    0.9363291775690445,
+    0.3511234415883917
+  ],
+  "metrosPorPixel": 0.5,
+  "contornoPx": [
+    [
+      8464,
+      3671
+    ],
+    [
+      8503,
+      3555
+    ],
+    [
+      8618,
+      3589
+    ],
+    [
+      8608,
+      3617
+    ],
+    [
+      8639,
+      3624
+    ],
+    [
+      8641,
+      3615
+    ],
+    [
+      8668,
+      3623
+    ],
+    [
+      8665,
+      3633
+    ],
+    [
+      8770,
+      3669
+    ],
+    [
+      8760,
+      3702
+    ],
+    [
+      8793,
+      3714
+    ],
+    [
+      8776,
+      3788
+    ]
+  ],
+  "divisionesPx": [
+    [
+      [
+        8608,
+        3617
+      ],
+      [
+        8572,
+        3708
+      ]
+    ],
+    [
+      [
+        8696,
+        3648
+      ],
+      [
+        8666,
+        3741
+      ]
+    ]
+  ],
+  "contornoLocal": [
+    [
+      -72.858,
+      27.856
+    ],
+    [
+      -74.965,
+      -33.298
+    ],
+    [
+      -15.157,
+      -37.57
+    ],
+    [
+      -14.923,
+      -22.706
+    ],
+    [
+      0.819,
+      -24.871
+    ],
+    [
+      0.176,
+      -29.436
+    ],
+    [
+      14.22,
+      -30.431
+    ],
+    [
+      14.572,
+      -25.222
+    ],
+    [
+      70.049,
+      -26.802
+    ],
+    [
+      71.161,
+      -9.597
+    ],
+    [
+      88.717,
+      -9.773
+    ],
+    [
+      93.75,
+      27.856
+    ]
+  ],
+  "divisionesLocal": [
+    [
+      [
+        -14.923,
+        -22.706
+      ],
+      [
+        -15.801,
+        26.217
+      ]
+    ],
+    [
+      [
+        31.718,
+        -23.642
+      ],
+      [
+        34.0,
+        25.164
+      ]
+    ]
+  ],
+  "confianza": "Topología tres recintos alta; puntos aproximados ± varios píxeles. Espesores y detalles no medidos.",
+  "contraste1946": {
+    "fuente": "1950-archiveorg-plano-de-caracas-dcn/original.tif",
+    "centroRecorteOriginal": [
+      6613,
+      1923
+    ],
+    "ventanaOriginal": [
+      6253,
+      1623,
+      6973,
+      2223
+    ],
+    "lectura": "Conserva tres recintos y escalón noreste. Confirma continuidad, no todos los espesores."
+  },
+  "limite1889": "Mantiene tres compartimientos; proporciones distintas en el plano calzado. No prueba reforma ni autoriza una capilla independiente. Usar contorno1936 como aproximación declarada, pendiente contraste de anclaje."
+}

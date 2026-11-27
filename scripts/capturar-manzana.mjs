@@ -1,0 +1,4 @@
+import {chromium} from 'playwright';
+import {mkdir} from 'node:fs/promises';
+const b=await chromium.launch({headless:true,args:['--no-sandbox']});
+try{const p=await b.newPage({viewport:{width:1440,height:1000}});p.setDefaultTimeout(90000);p.on('pageerror',e=>console.log('ERROR',e.message));await p.goto('http://localhost:5178/manzana-colonial.html');await p.waitForFunction(()=>window.estudioManzana);await mkdir('entregables/manzana-colonial',{recursive:true});for(const v of ['perspectiva','planta','calle']){await p.click(`[data-vista="${v}"]`);await p.screenshot({path:`entregables/manzana-colonial/${v}.png`});}console.log(await p.evaluate(()=>({plan:window.estudioManzana.plan.estadisticas,triangulos:window.estudioManzana.render.info.render.triangles,mallas:window.estudioManzana.render.info.render.calls})));}finally{await b.close();}

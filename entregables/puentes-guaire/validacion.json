@@ -1,0 +1,107 @@
+{
+  "errores": [],
+  "resultados": [
+    {
+      "id": "sucre",
+      "etapa": {
+        "id": "sucre",
+        "anio": 1911,
+        "presente": true,
+        "modelo": "bowstring",
+        "fase": "Puente Sucre · estructura metálica de 1895"
+      },
+      "render": {
+        "frame": 10,
+        "calls": 9,
+        "triangles": 6434,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "hierro",
+      "etapa": {
+        "id": "hierro",
+        "anio": 1889,
+        "presente": true,
+        "modelo": "hierro",
+        "fase": "Puente de Hierro · estructura anterior a 1937"
+      },
+      "render": {
+        "frame": 10,
+        "calls": 11,
+        "triangles": 13370,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "dolores",
+      "etapa": {
+        "id": "dolores",
+        "anio": 1911,
+        "presente": true,
+        "modelo": "dolores",
+        "fase": "Puente Dolores · antes de las reformas de 1915"
+      },
+      "render": {
+        "frame": 10,
+        "calls": 9,
+        "triangles": 7994,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "restaurador",
+      "etapa": {
+        "id": "restaurador",
+        "anio": 1911,
+        "presente": true,
+        "modelo": "restaurador",
+        "fase": "Estructura documentada hacia 1911"
+      },
+      "render": {
+        "frame": 10,
+        "calls": 11,
+        "triangles": 21146,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "diciembre",
+      "etapa": {
+        "id": "diciembre",
+        "anio": 1911,
+        "presente": true,
+        "modelo": "diciembre",
+        "fase": "Estructura documentada hacia 1911"
+      },
+      "render": {
+        "frame": 10,
+        "calls": 11,
+        "triangles": 7274,
+        "points": 0,
+        "lines": 0
+      }
+    },
+    {
+      "id": "ayacucho",
+      "etapa": {
+        "id": "ayacucho",
+        "anio": 1936,
+        "presente": true,
+        "modelo": "ayacucho",
+        "fase": "Puente Ayacucho · posterior a 1924"
+      },
+      "render": {
+        "frame": 10,
+        "calls": 13,
+        "triangles": 19826,
+        "points": 0,
+        "lines": 0
+      }
+    }
+  ]
+}

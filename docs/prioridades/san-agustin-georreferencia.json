@@ -1,0 +1,32 @@
+{
+  "fuente": "DCN1936, mosaico del repositorio; contraste con plano de fotos1946",
+  "sistema": "píxeles del mosaico base1936, 0.5m/px",
+  "contorno_leido": [
+    [
+      9735,
+      8710
+    ],
+    [
+      9797,
+      8720
+    ],
+    [
+      9780,
+      8845
+    ],
+    [
+      9714,
+      8833
+    ]
+  ],
+  "centro": [
+    9756.5,
+    8777
+  ],
+  "ancho_m": 32.47,
+  "fondo_m": 62.73,
+  "fachada": "borde sur hacia Este14; inferencia de dirección IPC y eje longitudinal del plano",
+  "certeza": "aproximación cartográfica, no levantamiento catastral; grosor de línea y distinción recinto/edificio limitan precisión",
+  "uso": "envolvente de referencia; no reemplazar toda la manzana ni reservar el colegio norte o la casa cural oeste",
+  "modelo": "cuerpo30×56m, cornisas y escaleras dentro de aprox.32×63m; alturas32/24m segúnIPC, otras medidas interpretativas"
+}

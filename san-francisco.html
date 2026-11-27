@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Iglesia de San Francisco · Estudio por épocas</title>
+</head>
+<body>
+  <aside class="ficha">
+    <a class="volver" href="/">← Estudios de Caracas</a>
+    <div class="etiqueta">ARQUITECTURA / ESTUDIO 05</div>
+    <h1>Iglesia de San Francisco</h1>
+    <p class="intro">Iglesia de la Inmaculada Concepción · de la portada barroca de 1745 a la fachada de Juan Hurtado Manrique (1888).</p>
+    <div class="fecha" id="fecha"></div>
+    <h2 id="nombre"></h2>
+    <p id="subtitulo"></p>
+    <p id="historia"></p>
+    <div class="certeza">
+      <strong>Qué podemos afirmar</strong>
+      <p id="certeza"></p>
+    </div>
+    <details>
+      <summary>Fuentes y criterio de reconstrucción</summary>
+      <ul id="fuentes"></ul>
+      <p>Se cotejaron la litografía histórica de hacia 1845 (ya en <code>../caracas/fuentes/imagenes/1845-commons-iglesia-de-san-francisco</code>), fotografías de Wikimedia Commons de la fachada de Juan Hurtado Manrique (tres puertas, estatuas genovesas de 1655, óculo, volutas y frontón curvo partido sin torre campanario), la vista interior de tres naves y el artículo de Wikipedia.</p>
+      <p>La huella nominal de 19,6 × 62 m respeta el rectángulo del hito <code>san-francisco</code> en <code>../caracas/src/hitos/datos/iglesias.js</code>. Las imágenes consultadas no se redistribuyen ni se emplean como texturas.</p>
+      <p>La <strong>Ceiba de San Francisco</strong> (plantada hacia 1866) es opcional en el visor desde 1889 y se omite automáticamente en modo <code>ciudad</code> para no duplicar <code>arboles.bin</code> de <code>../caracas</code>.</p>
+    </details>
+    <button id="exportar">↓ Descargar modelo GLB</button>
+    <p class="nota">Propuesta para revisar antes de integrar en ../caracas. Guía técnica en <code>docs/integracion-caracas-san-francisco.md</code>.</p>
+  </aside>
+  <main>
+    <div id="visor" aria-label="Modelo tridimensional de la Iglesia de San Francisco de Caracas"></div>
+    <div class="herramientas" role="group" aria-label="Vista del modelo">
+      <button data-vista="perspectiva">Perspectiva</button>
+      <button data-vista="frente">Fachada Norte</button>
+      <button data-vista="costado">Costado Este</button>
+      <button data-vista="interior">Interior / Nave</button>
+      <button data-vista="planta">Planta</button>
+      <button data-vista="detalle">Detalle Portada</button>
+      <label><input id="techos" type="checkbox" checked> Cubiertas</label>
+      <label><input id="ceiba" type="checkbox" checked> Ceiba (1889+)</label>
+    </div>
+    <div class="orientacion">+Z NORTE (AV. UNIVERSIDAD / FACHADA) · -Z SUR (NAVE) · -X ESTE (ESQ. SAN FRANCISCO) · +X OESTE (ACADEMIAS)<br><span>Arrastra para girar · rueda para acercar</span></div>
+    <nav aria-label="Épocas del edificio" id="epocas"></nav>
+  </main>
+  <script type="module" src="/src/san-francisco-visor.js"></script>
+</body>
+</html>
